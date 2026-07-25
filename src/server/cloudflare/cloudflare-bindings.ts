@@ -1,12 +1,18 @@
 export interface D1DatabaseBinding {
   prepare(query: string): D1PreparedStatementBinding;
+  batch(statements: D1PreparedStatementBinding[]): Promise<D1ResultBinding[]>;
 }
 
 export interface D1PreparedStatementBinding {
   bind(...values: unknown[]): D1PreparedStatementBinding;
   first<T = Record<string, unknown>>(): Promise<T | null>;
   all<T = Record<string, unknown>>(): Promise<{ results: T[] }>;
-  run(): Promise<{ success: boolean; meta: { changes?: number } }>;
+  run(): Promise<D1ResultBinding>;
+}
+
+export interface D1ResultBinding {
+  success: boolean;
+  meta: { changes?: number };
 }
 
 export interface R2BucketBinding {

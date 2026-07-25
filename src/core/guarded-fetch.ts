@@ -46,6 +46,11 @@ export interface GuardedFetchOptions {
   skipDnsValidation?: boolean;
   /** Transform errors thrown by the underlying transport before they escape the guarded fetch. */
   mapTransportError?: (error: unknown) => unknown;
+  /**
+   * Additional credential-bearing headers to strip when a redirect crosses
+   * origins. Use this for runtime-configured authentication header names.
+   */
+  sensitiveHeaders?: Iterable<string>;
 }
 
 // Match the platform default for `redirect: "follow"` (undici/browsers follow up
@@ -162,6 +167,10 @@ export function createGuardedFetch(options: GuardedFetchOptions = {}): typeof fe
   const baseFetch = unwrapGuardedFetch(options.fetch);
   const createError = options.createError ?? ((message: string) => new TypeError(message));
   const maxRedirects = options.maxRedirects ?? defaultMaxRedirects;
+  const sensitiveHeaders = new Set([
+    ...crossOriginCredentialHeaders,
+    ...Array.from(options.sensitiveHeaders ?? [], (name) => name.toLowerCase()),
+  ]);
   const guardedFetch = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const transport = baseFetch ?? globalThis.fetch;
     const fetchTransport = async (
@@ -252,7 +261,7 @@ export function createGuardedFetch(options: GuardedFetchOptions = {}): typeof fe
       }
       if (guardedNext.origin !== url.origin) {
         for (const name of [...headers.keys()]) {
-          if (crossOriginCredentialHeaders.has(name)) {
+          if (sensitiveHeaders.has(name)) {
             headers.delete(name);
           }
         }

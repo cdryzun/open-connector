@@ -169,6 +169,43 @@ export interface RuntimeActionResponse {
   errorCode?: string;
 }
 
+export type UpstreamMcpAuth = { type: "none" } | { type: "bearer" } | { type: "api_key_header"; headerName: string };
+
+export interface UpstreamMcpServer {
+  service: string;
+  slug: string;
+  displayName: string;
+  description?: string;
+  endpoint: string;
+  auth: UpstreamMcpAuth;
+  enabled: boolean;
+  revision: number;
+  syncStatus: "never" | "ok" | "error";
+  lastSyncAt?: string;
+  lastSyncError?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpstreamMcpTool {
+  service: string;
+  upstreamName: string;
+  actionName: string;
+  title?: string;
+  description?: string;
+  enabled: boolean;
+  status: "available" | "review_required" | "removed" | "invalid";
+  invalidReason?: string;
+  contractHash: string;
+  firstSeenAt: string;
+  lastSeenAt: string;
+}
+
+export interface UpstreamMcpServerWithTools {
+  server: UpstreamMcpServer;
+  tools: UpstreamMcpTool[];
+}
+
 export interface AppData {
   providers: ProviderDefinition[];
   connections: ConnectionRecord[];

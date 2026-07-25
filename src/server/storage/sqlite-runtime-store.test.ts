@@ -47,6 +47,7 @@ describe("SqliteRuntimeDatabase", () => {
       "0006_connection_identity.sql",
       "0007_runtime_policy.sql",
       "0008_runtime_token_policy.sql",
+      "0009_upstream_mcp.sql",
     ];
     expect(entries.filter((entry) => entry.message === "sqlite migration started")).toEqual(
       migrations.map((migration) => ({ fields: { migration }, message: "sqlite migration started" })),

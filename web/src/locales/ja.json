@@ -40,6 +40,7 @@
   "nav": {
     "overview": "概要",
     "providers": "プロバイダー",
+    "mcpServers": "MCP サーバー",
     "actions": "アクション",
     "runs": "実行履歴",
     "access": "API Key",
@@ -66,6 +67,10 @@
       "providers": {
         "title": "プロバイダー",
         "subtitle": "プロバイダーを接続し、機能を確認します。"
+      },
+      "mcpServers": {
+        "title": "MCP サーバー",
+        "subtitle": "上流 MCP サーバーと公開ツールを設定します。"
       },
       "actions": {
         "title": "アクション",
@@ -118,6 +123,56 @@
     "callCountMany": "{{count}} 回の呼び出し",
     "noRecentCallsTitle": "最近の呼び出しはありません",
     "noRecentCallsDescription": "アクションを実行するとプロバイダー別の呼び出し数が表示されます。"
+  },
+  "mcpServers": {
+    "title": "上流 MCP サーバー",
+    "description": "Streamable HTTP MCP サーバーを接続し、承認済みツールをアクションとして公開します。",
+    "add": "サーバーを追加",
+    "create": "作成して同期",
+    "creating": "MCP サーバーを作成して同期しています...",
+    "created": "MCP サーバーを作成しました。",
+    "sync": "同期",
+    "syncing": "ツール契約を同期しています...",
+    "synced": "ツール契約を同期しました。",
+    "enable": "有効化",
+    "disable": "無効化",
+    "delete": "削除",
+    "deleteConfirm": "{{name}} と保存済み接続を削除しますか？",
+    "revision": "リビジョン",
+    "reviewRequired": "レビューが必要",
+    "tools": "公開ツール",
+    "toolsDescription": "新規または変更されたツールは、承認するまで無効です。",
+    "saveTools": "ツール選択を保存",
+    "savingTools": "ツール選択を保存しています...",
+    "toolsSaved": "ツール選択を保存しました。",
+    "emptyTitle": "上流 MCP サーバーがありません",
+    "emptyDescription": "Streamable HTTP エンドポイントを追加して、承認済みツールを Agent に提供します。",
+    "noToolsTitle": "検出されたツールはありません",
+    "noToolsDescription": "サーバーを同期してツール契約を読み込んでください。",
+    "fields": {
+      "name": "表示名",
+      "slug": "スラッグ",
+      "endpoint": "MCP エンドポイント",
+      "auth": "認証",
+      "headerName": "API Key ヘッダー",
+      "credential": "認証情報"
+    },
+    "auth": {
+      "none": "認証なし",
+      "bearer": "Bearer Token",
+      "apiKeyHeader": "カスタム API Key ヘッダー"
+    },
+    "syncStatus": {
+      "never": "未同期",
+      "ok": "同期済み",
+      "error": "同期失敗"
+    },
+    "toolStatus": {
+      "available": "利用可能",
+      "review_required": "レビューが必要",
+      "removed": "上流で削除済み",
+      "invalid": "無効な契約"
+    }
   },
   "providers": {
     "catalogTitle": "プロバイダー",

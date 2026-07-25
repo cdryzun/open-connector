@@ -32,6 +32,8 @@ export interface ProviderFetchOptions {
    * derived from user/credential input. See {@link GuardedFetchOptions.skipDnsValidation}.
    */
   skipDnsValidation?: boolean;
+  /** Runtime-configured credential headers removed from cross-origin redirects. */
+  sensitiveHeaders?: Iterable<string>;
 }
 
 /**
@@ -45,6 +47,7 @@ export function createProviderFetch(options: ProviderFetchOptions = {}): Provide
     fetch: options.fetch,
     allowPrivateNetwork: options.allowPrivateNetwork,
     skipDnsValidation: options.skipDnsValidation,
+    sensitiveHeaders: options.sensitiveHeaders,
     mapTransportError: (error) =>
       error instanceof TypeError ? new ProviderRequestError(502, "provider network request failed") : error,
     createError: (message) => new ProviderRequestError(502, message),

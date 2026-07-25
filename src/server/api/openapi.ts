@@ -201,6 +201,10 @@ export function createOpenApiDocument(
       items: { $ref: "#/components/schemas/ConnectionSummary" },
     }),
     "/api/connections/{service}": createConnectionPath(),
+    "/api/mcp-servers": createUpstreamMcpServersPath(),
+    "/api/mcp-servers/{service}": createUpstreamMcpServerPath(),
+    "/api/mcp-servers/{service}/sync": createUpstreamMcpSyncPath(),
+    "/api/mcp-servers/{service}/tools": createUpstreamMcpToolsPath(),
     "/api/oauth/configs": getOperation("OAuth", "List local OAuth client configurations.", {
       type: "array",
       items: { $ref: "#/components/schemas/OAuthClientConfigSummary" },
@@ -236,6 +240,7 @@ export function createOpenApiDocument(
       { name: "System", description: "Runtime health and server-level status." },
       { name: "Catalog", description: "Provider and action metadata used by users and agents." },
       { name: "Connections", description: "Local provider credentials and connection state." },
+      { name: "MCP Upstreams", description: "Configured upstream MCP servers and reviewed tool contracts." },
       { name: "OAuth", description: "Local OAuth client configuration and authorization flow." },
       { name: "Access", description: "Runtime execution policy and bearer tokens for /v1 and MCP clients." },
       { name: "Files", description: "Local temporary file transit for provider actions." },
@@ -330,6 +335,37 @@ export function createOpenApiDocument(
         ),
         ErrorResponse: errorResponseSchema,
         ConnectionUpsertRequest: createConnectionUpsertRequestSchema(),
+        UpstreamMcpServer: jsonSchema.unknownObject(
+          "Configured upstream MCP server. Credential values are never returned.",
+        ),
+        UpstreamMcpServerWithTools: jsonSchema.unknownObject(
+          "Configured upstream MCP server and its discovered tool contracts.",
+        ),
+        UpstreamMcpServerRequest: jsonSchema.object(
+          {
+            slug: jsonSchema.string({ description: "Stable lowercase slug used to derive the service id." }),
+            displayName: jsonSchema.string({ description: "Human-readable server name." }),
+            description: jsonSchema.string({ description: "Optional server description." }),
+            endpoint: jsonSchema.string({ description: "Streamable HTTP MCP endpoint." }),
+            auth: jsonSchema.unknownObject("Authentication mode: none, bearer, or api_key_header."),
+            credential: jsonSchema.string({ description: "Optional credential stored as the default connection." }),
+            sync: jsonSchema.boolean({ description: "Synchronize tools after saving. Defaults to true." }),
+          },
+          {
+            required: ["slug", "displayName", "endpoint", "auth"],
+            description: "Create an upstream MCP server.",
+          },
+        ),
+        UpstreamMcpToolSelectionRequest: jsonSchema.object(
+          {
+            expectedRevision: { type: "integer", minimum: 1 },
+            enabledTools: { type: "array", items: { type: "string" } },
+          },
+          {
+            required: ["expectedRevision", "enabledTools"],
+            description: "Optimistic-locking tool publication selection.",
+          },
+        ),
         OAuthClientConfigSummary: jsonSchema.object(
           {
             service: jsonSchema.string({ description: "Provider service identifier." }),
@@ -990,6 +1026,123 @@ function createConnectionPath(): Record<string, unknown> {
           ],
         }),
         404: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
+      },
+    },
+  };
+}
+
+function createUpstreamMcpServersPath(): Record<string, unknown> {
+  return {
+    get: {
+      tags: ["MCP Upstreams"],
+      summary: "List configured upstream MCP servers.",
+      responses: {
+        200: jsonResponse({
+          type: "array",
+          items: { $ref: "#/components/schemas/UpstreamMcpServer" },
+        }),
+      },
+    },
+    post: {
+      tags: ["MCP Upstreams"],
+      summary: "Create and optionally synchronize an upstream MCP server.",
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: { $ref: "#/components/schemas/UpstreamMcpServerRequest" },
+          },
+        },
+      },
+      responses: {
+        201: jsonResponse({ $ref: "#/components/schemas/UpstreamMcpServerWithTools" }),
+        400: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
+        409: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
+        502: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
+      },
+    },
+  };
+}
+
+function createUpstreamMcpServerPath(): Record<string, unknown> {
+  return {
+    get: {
+      tags: ["MCP Upstreams"],
+      summary: "Get one upstream MCP server and its discovered tools.",
+      responses: {
+        200: jsonResponse({ $ref: "#/components/schemas/UpstreamMcpServerWithTools" }),
+        404: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
+      },
+    },
+    put: {
+      tags: ["MCP Upstreams"],
+      summary: "Update and optionally synchronize an upstream MCP server.",
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: jsonSchema.unknownObject("Partial upstream MCP server update."),
+          },
+        },
+      },
+      responses: {
+        200: jsonResponse({ $ref: "#/components/schemas/UpstreamMcpServerWithTools" }),
+        400: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
+        404: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
+        502: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
+      },
+    },
+    delete: {
+      tags: ["MCP Upstreams"],
+      summary: "Delete an upstream MCP server and its stored connections.",
+      responses: {
+        200: jsonResponse(jsonSchema.unknownObject("Upstream MCP server deletion result.")),
+        404: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
+      },
+    },
+  };
+}
+
+function createUpstreamMcpSyncPath(): Record<string, unknown> {
+  return {
+    post: {
+      tags: ["MCP Upstreams"],
+      summary: "Synchronize upstream tools and pause changed contracts for review.",
+      responses: {
+        200: jsonResponse(jsonSchema.unknownObject("Upstream MCP synchronization summary.")),
+        404: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
+        502: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
+      },
+    },
+  };
+}
+
+function createUpstreamMcpToolsPath(): Record<string, unknown> {
+  return {
+    get: {
+      tags: ["MCP Upstreams"],
+      summary: "List discovered tools for one upstream MCP server.",
+      responses: {
+        200: jsonResponse(jsonSchema.unknownObject("Discovered upstream MCP tools and current server revision.")),
+        404: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
+      },
+    },
+    put: {
+      tags: ["MCP Upstreams"],
+      summary: "Publish an explicit set of reviewed upstream MCP tools.",
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: { $ref: "#/components/schemas/UpstreamMcpToolSelectionRequest" },
+          },
+        },
+      },
+      responses: {
+        200: jsonResponse(jsonSchema.unknownObject("Updated tool publication selection.")),
+        400: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
+        404: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
+        409: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
       },
     },
   };

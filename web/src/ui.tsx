@@ -21,6 +21,7 @@ import {
   Loader2,
   Monitor,
   Moon,
+  Network,
   RefreshCw,
   Sun,
   TerminalSquare,
@@ -32,6 +33,7 @@ import { ActionsPage } from "./actions-page";
 import { ApiError, apiGet, apiPost } from "./api";
 import oomolConnectLogoUrl from "./assets/oomol-connect-logo.png";
 import { persistLang, supportedLangs } from "./i18n";
+import { McpServersPage } from "./mcp-servers-page";
 import { emptyData } from "./model";
 import { OverviewPage } from "./overview-page";
 import { ProvidersPage } from "./providers-page";
@@ -47,6 +49,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 const navItems = [
   { path: "/overview", labelKey: "nav.overview", icon: Home },
   { path: "/providers", labelKey: "nav.providers", icon: Cable },
+  { path: "/mcp-servers", labelKey: "nav.mcpServers", icon: Network },
   { path: "/actions", labelKey: "nav.actions", icon: TerminalSquare },
   { path: "/runs", labelKey: "nav.runs", icon: Activity },
   { path: "/access", labelKey: "nav.access", icon: KeyRound },
@@ -130,9 +133,9 @@ export interface RuntimeLoadResult {
 /**
  * Loads dashboard state.
  *
- * The provider catalog is generated at build time and cannot change while the
- * server runs, so `cachedProviders` lets refreshes skip re-downloading it and
- * re-fetch only mutable data.
+ * `cachedProviders` is retained for callers that already own a current
+ * revision. The console itself reloads providers because upstream MCP
+ * synchronization can change the runtime catalog.
  */
 export async function loadRuntimeData(
   unlockToken: string,
@@ -145,7 +148,6 @@ export async function loadRuntimeData(
 
   const catalogRequest =
     cachedProviders !== undefined ? Promise.resolve(cachedProviders) : apiGet<ProviderDefinition[]>("/api/providers");
-
   const [providers, connections, oauthConfigs, runtimeTokens, runtimePolicy, runPage] = await Promise.all([
     catalogRequest,
     apiGet<ConnectionRecord[]>("/api/connections"),
@@ -178,9 +180,6 @@ export function App(): ReactNode {
     authenticated: true,
   });
   const pendingUnlockToken = useRef("");
-  // Catalog is immutable while the server runs, so it is fetched once and
-  // reused across refreshes instead of being re-downloaded on every action.
-  const cachedProviders = useRef<ProviderDefinition[] | undefined>(undefined);
   const [locked, setLocked] = useState(false);
   const [loading, setLoading] = useState(true);
   const [runtimeChecked, setRuntimeChecked] = useState(false);
@@ -199,10 +198,9 @@ export function App(): ReactNode {
     let cancelled = false;
     const requestUnlockToken = pendingUnlockToken.current;
     setLoading(true);
-    loadRuntimeData(requestUnlockToken, cachedProviders.current)
+    loadRuntimeData(requestUnlockToken)
       .then(({ authSession: session, data: nextData }) => {
         if (!cancelled) {
-          cachedProviders.current = session.authenticated ? nextData.providers : undefined;
           const nextAuth = nextAuthLoadState(
             {
               pendingUnlockToken: pendingUnlockToken.current,
@@ -224,7 +222,6 @@ export function App(): ReactNode {
         }
         if (caught instanceof ApiError && caught.status === 401) {
           pendingUnlockToken.current = "";
-          cachedProviders.current = undefined;
           setData(emptyData);
           setAuthSession({ adminAuthConfigured: true, authenticated: false });
           setLocked(true);
@@ -247,6 +244,10 @@ export function App(): ReactNode {
 
   function refresh(): void {
     setRefreshToken((value) => value + 1);
+  }
+
+  function refreshCatalog(): void {
+    refresh();
   }
 
   function unlock(token: string): void {
@@ -284,6 +285,7 @@ export function App(): ReactNode {
       error={error}
       theme={theme}
       onRefresh={refresh}
+      onCatalogRefresh={refreshCatalog}
       onThemeChange={setTheme}
       onLogout={logout}
     />
@@ -310,6 +312,7 @@ function AppShell(props: {
   error: string | null;
   theme: ThemeMode;
   onRefresh(): void;
+  onCatalogRefresh(): void;
   onThemeChange(theme: ThemeMode): void;
   onLogout(): void;
 }): ReactNode {
@@ -402,6 +405,7 @@ function AppShell(props: {
               path="/providers/:service"
               element={<ProvidersPage data={props.data} onRefresh={props.onRefresh} />}
             />
+            <Route path="/mcp-servers" element={<McpServersPage onRefresh={props.onCatalogRefresh} />} />
             <Route path="/actions" element={<ActionsPage data={props.data} onRefresh={props.onRefresh} />} />
             <Route path="/actions/:actionId" element={<ActionsPage data={props.data} onRefresh={props.onRefresh} />} />
             <Route
@@ -559,6 +563,9 @@ function headingForPath(pathname: string): string {
   const section = pathname.split("/").filter(Boolean)[0];
   if (section === "providers") {
     return "providers";
+  }
+  if (section === "mcp-servers") {
+    return "mcpServers";
   }
   if (section === "actions") {
     return "actions";

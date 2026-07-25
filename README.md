@@ -181,9 +181,9 @@ For npm-based local development, open `http://localhost:5173`; the Web Console d
 API requests to the runtime on `http://localhost:3000`. For Docker or a built Node runtime, the
 console is served from `http://localhost:3000`.
 
-The console supports provider browsing, API key and OAuth client configuration, runtime token
-creation, Action schema inspection, Action debugging, recent run review, and access to the
-generated OpenAPI and MCP metadata.
+The console supports provider browsing, upstream MCP server registration and tool review, API key
+and OAuth client configuration, runtime token creation, Action schema inspection, Action debugging,
+recent run review, and access to the generated OpenAPI and MCP metadata.
 
 ## Cloudflare Deployment
 
@@ -232,6 +232,7 @@ create, and sync across connected tools.
 - [Developer tools](docs/sdk-cli.md)
 - [Gmail OAuth and SDK tutorial](docs/gmail-oauth-sdk.md)
 - [Runtime API and MCP](docs/runtime-api.md)
+- [Upstream MCP servers](docs/upstream-mcp.md)
 - [Fly.io deployment](docs/fly-io.md)
 - [Cloudflare deployment](docs/cloudflare.md)
 - [Docker image (GHCR)](docs/docker-ghcr.md)

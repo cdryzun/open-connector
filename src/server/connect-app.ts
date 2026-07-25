@@ -1,5 +1,6 @@
 import type { CatalogStore } from "../catalog-store.ts";
 import type { ActionPolicyService } from "../core/action-policy.ts";
+import type { IUpstreamMcpClient } from "../mcp-upstream/mcp-client.ts";
 import type { IProviderLoader } from "../providers/provider-loader.ts";
 import type { RuntimeJwtVerifier } from "./api/runtime-jwt.ts";
 import type { ITransitFileService } from "./files/transit-file-store.ts";
@@ -9,6 +10,9 @@ import type { RuntimeDatabase } from "./storage/runtime-database.ts";
 import type { Hono } from "hono";
 
 import { ConnectionService } from "../connection-service.ts";
+import { UpstreamMcpClient } from "../mcp-upstream/mcp-client.ts";
+import { UpstreamMcpServerService } from "../mcp-upstream/mcp-server-service.ts";
+import { UpstreamMcpProviderLoader } from "../mcp-upstream/provider-loader.ts";
 import { OAuthClientConfigService } from "../oauth/oauth-client-config-service.ts";
 import { OAuthCredentialRefreshService } from "../oauth/oauth-credential-refresh-service.ts";
 import { OAuthFlowService } from "../oauth/oauth-flow-service.ts";
@@ -30,6 +34,7 @@ export interface ConnectAppOptions {
   registerStaticRoutes?: (app: Hono) => void;
   logger?: Logger;
   computeRuntimeAuthConfigured?: boolean;
+  upstreamMcpClient?: IUpstreamMcpClient;
 }
 
 export interface ConnectApp {
@@ -40,6 +45,12 @@ export interface ConnectApp {
 export async function createConnectApp(options: ConnectAppOptions): Promise<ConnectApp> {
   const runtimeTokens = new RuntimeTokenService(options.runtimeDatabase.runtimeTokenStore);
   const hasStoredRuntimeTokens = async (): Promise<boolean> => (await runtimeTokens.listTokens()).length > 0;
+  const upstreamMcpClient = options.upstreamMcpClient ?? new UpstreamMcpClient();
+  const providerLoader = new UpstreamMcpProviderLoader({
+    base: options.providerLoader,
+    client: upstreamMcpClient,
+    store: options.runtimeDatabase.upstreamMcpServerStore,
+  });
   const oauthClientConfigs = new OAuthClientConfigService({
     catalog: options.catalog,
     origin: options.publicOrigin,
@@ -48,13 +59,20 @@ export async function createConnectApp(options: ConnectAppOptions): Promise<Conn
   const connections = new ConnectionService({
     catalog: options.catalog,
     oauthCredentials: new OAuthCredentialRefreshService(oauthClientConfigs),
-    providerLoader: options.providerLoader,
+    providerLoader,
     store: options.runtimeDatabase.connectionStore,
     logger: options.logger,
   });
+  const upstreamMcps = new UpstreamMcpServerService({
+    catalog: options.catalog,
+    client: upstreamMcpClient,
+    connections,
+    store: options.runtimeDatabase.upstreamMcpServerStore,
+  });
+  await upstreamMcps.initialize();
   const actions = new ActionRunner({
     catalog: options.catalog,
-    providerLoader: options.providerLoader,
+    providerLoader,
     connections,
     runs: options.runtimeDatabase.runLogStore,
     transitFiles: options.transitFiles,
@@ -65,7 +83,7 @@ export async function createConnectApp(options: ConnectAppOptions): Promise<Conn
   return {
     app: new ConnectServer({
       catalog: options.catalog,
-      providerLoader: options.providerLoader,
+      providerLoader,
       connections,
       oauthClientConfigs,
       oauthFlow: new OAuthFlowService({
@@ -78,6 +96,7 @@ export async function createConnectApp(options: ConnectAppOptions): Promise<Conn
       transitFiles: options.transitFiles,
       runtimeTokens,
       runtimePolicyStore: options.runtimeDatabase.runtimePolicyStore,
+      upstreamMcps,
       registerStaticRoutes: options.registerStaticRoutes,
       auth: {
         adminToken: options.adminToken,

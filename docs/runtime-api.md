@@ -50,6 +50,11 @@ The MCP server exposes a small discovery-oriented tool set:
 - `get_action_guide`
 - `execute_action`
 
+Configured upstream MCP servers do not expand this fixed downstream tool set. Their reviewed tools
+appear as normal Actions and are discovered through `search_actions`, then invoked through
+`execute_action`. See [Upstream MCP Servers](upstream-mcp.md) for registration, synchronization,
+contract review, and security behavior.
+
 Use `list_connections` to discover configured accounts before selecting one. Both
 `get_action_guide` and `execute_action` accept an optional `connectionName`:
 

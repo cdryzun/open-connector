@@ -231,6 +231,33 @@ export function createActionSearchIndexProvider(actions: Iterable<ActionDefiniti
   };
 }
 
+/**
+ * Build an index lazily and rebuild it only when the catalog revision changes.
+ */
+export function createRevisionedActionSearchIndexProvider(input: {
+  getActions(): Iterable<ActionDefinition>;
+  getRevision(): number;
+}): ActionSearchIndexProvider {
+  let revision = -1;
+  let indexPromise: Promise<MiniSearch<ActionSearchDocument>> | undefined;
+  return {
+    get() {
+      const currentRevision = input.getRevision();
+      if (!indexPromise || currentRevision !== revision) {
+        revision = currentRevision;
+        const building = Promise.resolve().then(() => buildActionSearchIndex(input.getActions()));
+        building.catch(() => {
+          if (indexPromise === building) {
+            indexPromise = undefined;
+          }
+        });
+        indexPromise = building;
+      }
+      return indexPromise;
+    },
+  };
+}
+
 export function searchActions(
   index: MiniSearch<ActionSearchDocument>,
   query: string,

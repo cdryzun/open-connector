@@ -400,6 +400,116 @@ describe("D1RuntimeDatabase", () => {
     });
     await expect(database.runLogStore.get("run-2")).resolves.toMatchObject({ id: "run-2" });
   });
+
+  it("stores upstream MCP contracts and applies optimistic tool publication", async () => {
+    const database = new D1RuntimeDatabase(new SqliteD1Database());
+    const server = {
+      service: "mcp_example",
+      slug: "example",
+      displayName: "Example MCP",
+      endpoint: "https://mcp.example.com/mcp",
+      auth: { type: "none" as const },
+      enabled: true,
+      revision: 1,
+      syncStatus: "never" as const,
+      createdAt: "2026-07-25T00:00:00.000Z",
+      updatedAt: "2026-07-25T00:00:00.000Z",
+    };
+
+    await expect(database.upstreamMcpServerStore.createServer(server)).resolves.toBe(true);
+    await expect(database.upstreamMcpServerStore.createServer(server)).resolves.toBe(false);
+    await expect(
+      database.upstreamMcpServerStore.applySync({
+        expectedRevision: 1,
+        server: {
+          ...server,
+          revision: 2,
+          syncStatus: "ok",
+          lastSyncAt: "2026-07-25T00:01:00.000Z",
+          updatedAt: "2026-07-25T00:01:00.000Z",
+        },
+        tools: [
+          {
+            service: server.service,
+            upstreamName: "search",
+            actionName: "search",
+            description: "Search records.",
+            inputSchema: { type: "object" },
+            contractHash: "hash-1",
+            enabled: false,
+            status: "available",
+            firstSeenAt: "2026-07-25T00:01:00.000Z",
+            lastSeenAt: "2026-07-25T00:01:00.000Z",
+          },
+        ],
+        result: {
+          service: server.service,
+          discovered: 1,
+          added: 1,
+          changed: 0,
+          unchanged: 0,
+          removed: 0,
+          invalid: 0,
+          syncedAt: "2026-07-25T00:01:00.000Z",
+        },
+      }),
+    ).resolves.toMatchObject({ revision: 2, added: 1 });
+
+    await expect(
+      database.upstreamMcpServerStore.applySync({
+        expectedRevision: 1,
+        server: {
+          ...server,
+          revision: 3,
+          syncStatus: "ok",
+          lastSyncAt: "2026-07-25T00:01:30.000Z",
+          updatedAt: "2026-07-25T00:01:30.000Z",
+        },
+        tools: [],
+        result: {
+          service: server.service,
+          discovered: 0,
+          added: 0,
+          changed: 0,
+          unchanged: 0,
+          removed: 1,
+          invalid: 0,
+          syncedAt: "2026-07-25T00:01:30.000Z",
+        },
+      }),
+    ).resolves.toBeUndefined();
+    await expect(database.upstreamMcpServerStore.getServerWithTools(server.service)).resolves.toMatchObject({
+      server: { revision: 2 },
+      tools: [{ upstreamName: "search" }],
+    });
+
+    await expect(
+      database.upstreamMcpServerStore.setEnabledTools({
+        service: server.service,
+        expectedRevision: 2,
+        enabledTools: ["search"],
+        updatedAt: "2026-07-25T00:02:00.000Z",
+      }),
+    ).resolves.toEqual({
+      service: server.service,
+      revision: 3,
+      enabledTools: ["search"],
+    });
+    await expect(database.upstreamMcpServerStore.listEnabledServersWithTools()).resolves.toMatchObject([
+      {
+        server: { service: server.service, revision: 3 },
+        tools: [{ upstreamName: "search", enabled: true }],
+      },
+    ]);
+    await expect(
+      database.upstreamMcpServerStore.setEnabledTools({
+        service: server.service,
+        expectedRevision: 2,
+        enabledTools: [],
+        updatedAt: "2026-07-25T00:03:00.000Z",
+      }),
+    ).resolves.toBeUndefined();
+  });
 });
 
 function createRun(id: string, startedAt: string, actionId = "hackernews.get_top_stories", service = "hackernews") {
@@ -445,10 +555,32 @@ class SqliteD1Database implements D1DatabaseBinding {
     this.database.exec(
       readFileSync(new URL("../../../migrations/0008_runtime_token_policy.sql", import.meta.url), "utf8"),
     );
+    this.database.exec(readFileSync(new URL("../../../migrations/0009_upstream_mcp.sql", import.meta.url), "utf8"));
   }
 
   prepare(query: string): D1PreparedStatementBinding {
     return new SqliteD1PreparedStatement(this.database, query);
+  }
+
+  async batch(
+    statements: D1PreparedStatementBinding[],
+  ): Promise<Array<{ success: boolean; meta: { changes?: number } }>> {
+    this.database.exec("begin");
+    try {
+      const results = await Promise.all(
+        statements.map(async (statement) => {
+          if (!(statement instanceof SqliteD1PreparedStatement)) {
+            throw new Error("Unsupported D1 statement implementation.");
+          }
+          return await statement.run();
+        }),
+      );
+      this.database.exec("commit");
+      return results;
+    } catch (error) {
+      this.database.exec("rollback");
+      throw error;
+    }
   }
 
   exec(sql: string): void {

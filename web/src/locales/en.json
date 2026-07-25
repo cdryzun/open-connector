@@ -40,6 +40,7 @@
   "nav": {
     "overview": "Overview",
     "providers": "Providers",
+    "mcpServers": "MCP Servers",
     "actions": "Actions",
     "runs": "Runs",
     "access": "API Key",
@@ -66,6 +67,10 @@
       "providers": {
         "title": "Providers",
         "subtitle": "Connect providers and review provider capabilities."
+      },
+      "mcpServers": {
+        "title": "MCP Servers",
+        "subtitle": "Configure upstream MCP servers and published tools."
       },
       "actions": {
         "title": "Actions",
@@ -118,6 +123,56 @@
     "callCountMany": "{{count}} calls",
     "noRecentCallsTitle": "No recent calls",
     "noRecentCallsDescription": "Run an action to see provider call counts."
+  },
+  "mcpServers": {
+    "title": "Upstream MCP Servers",
+    "description": "Connect Streamable HTTP MCP servers and publish approved tools as actions.",
+    "add": "Add server",
+    "create": "Create and sync",
+    "creating": "Creating and synchronizing MCP server...",
+    "created": "MCP server created.",
+    "sync": "Sync",
+    "syncing": "Synchronizing tool contracts...",
+    "synced": "Tool contracts synchronized.",
+    "enable": "Enable",
+    "disable": "Disable",
+    "delete": "Delete",
+    "deleteConfirm": "Delete {{name}} and its stored connections?",
+    "revision": "Revision",
+    "reviewRequired": "Review required",
+    "tools": "Published tools",
+    "toolsDescription": "New and changed tools stay disabled until you approve them.",
+    "saveTools": "Save tool selection",
+    "savingTools": "Saving tool selection...",
+    "toolsSaved": "Tool selection saved.",
+    "emptyTitle": "No upstream MCP servers",
+    "emptyDescription": "Add a Streamable HTTP endpoint to make its approved tools available to agents.",
+    "noToolsTitle": "No discovered tools",
+    "noToolsDescription": "Synchronize the server to load its tool contracts.",
+    "fields": {
+      "name": "Display name",
+      "slug": "Slug",
+      "endpoint": "MCP endpoint",
+      "auth": "Authentication",
+      "headerName": "API key header",
+      "credential": "Credential"
+    },
+    "auth": {
+      "none": "No authentication",
+      "bearer": "Bearer token",
+      "apiKeyHeader": "Custom API key header"
+    },
+    "syncStatus": {
+      "never": "Not synchronized",
+      "ok": "Synchronized",
+      "error": "Sync failed"
+    },
+    "toolStatus": {
+      "available": "Available",
+      "review_required": "Review required",
+      "removed": "Removed upstream",
+      "invalid": "Invalid contract"
+    }
   },
   "providers": {
     "catalogTitle": "Providers",

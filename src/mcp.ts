@@ -12,7 +12,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod/v4";
 import { ConnectionError } from "./connection-service.ts";
 import { ActionPolicyService, emptyPolicyRules } from "./core/action-policy.ts";
-import { createActionSearchIndexProvider, searchActions as searchActionIndex } from "./core/action-search.ts";
+import { createRevisionedActionSearchIndexProvider, searchActions as searchActionIndex } from "./core/action-search.ts";
 import { renderActionMarkdown } from "./server/api/action-markdown.ts";
 
 /**
@@ -239,7 +239,12 @@ async function searchActions(
     return errorPayload("internal_error", "Runtime policy is unavailable.");
   }
   const query = input.query?.trim();
-  const actionSearch = options.actionSearch ?? createActionSearchIndexProvider(options.catalog.actions);
+  const actionSearch =
+    options.actionSearch ??
+    createRevisionedActionSearchIndexProvider({
+      getActions: () => options.catalog.actions,
+      getRevision: () => options.catalog.revision,
+    });
   const rankedActions = query
     ? searchActionIndex(await actionSearch.get(), query, { service: input.service, limit: input.limit })
         .map((result) => options.catalog.actionsById.get(result.id))

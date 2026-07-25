@@ -1,0 +1,143 @@
+.mcp-servers-page {
+  display: grid;
+  gap: 16px;
+}
+
+.mcp-servers-toolbar,
+.mcp-detail-heading,
+.mcp-tools-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.mcp-servers-toolbar p,
+.mcp-detail-heading p,
+.mcp-tools-heading p {
+  margin-top: 4px;
+  color: var(--muted-foreground);
+}
+
+.mcp-create-card,
+.mcp-server-detail {
+  padding: 20px;
+}
+
+.mcp-create-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.mcp-wide-field {
+  grid-column: 1 / -1;
+}
+
+.mcp-server-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.34fr) minmax(0, 1fr);
+  gap: 16px;
+  min-height: 520px;
+}
+
+.mcp-server-list {
+  align-self: start;
+  overflow: hidden;
+}
+
+.mcp-server-row,
+.mcp-tool-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.mcp-server-row {
+  cursor: pointer;
+}
+
+.mcp-server-row:hover,
+.mcp-server-row.active {
+  background: var(--accent);
+}
+
+.mcp-server-row > span,
+.mcp-tool-row > span {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 4px;
+}
+
+.mcp-server-row small,
+.mcp-tool-row small {
+  overflow: hidden;
+  color: var(--muted-foreground);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mcp-server-detail {
+  display: grid;
+  align-content: start;
+  gap: 20px;
+}
+
+.mcp-server-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+
+.mcp-server-meta div {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.mcp-server-meta dt {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.mcp-server-meta dd {
+  margin: 6px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.mcp-tool-list {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.mcp-tool-row:last-child,
+.mcp-server-row:last-child {
+  border-bottom: 0;
+}
+
+@media (max-width: 960px) {
+  .mcp-server-layout,
+  .mcp-create-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .mcp-wide-field {
+    grid-column: auto;
+  }
+
+  .mcp-detail-heading,
+  .mcp-tools-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

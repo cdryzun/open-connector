@@ -45,23 +45,24 @@ export type ProviderSummaryDefinition = Omit<RuntimeProviderDefinition, "actions
  * scan every provider.
  */
 export type CatalogStore = {
+  /** Monotonic in-process revision used to invalidate derived search indexes. */
+  revision: number;
   providers: RuntimeProviderDefinition[];
   /**
-   * Schema-free view of `providers`, precomputed once because the catalog is
-   * immutable at runtime. Served by `/api/providers` so the dashboard does not
+   * Schema-free view of `providers`, recomputed when the runtime catalog
+   * revision changes. Served by `/api/providers` so the dashboard does not
    * download every action schema on load.
    */
   providerSummaries: ProviderSummaryDefinition[];
   /**
-   * `providerSummaries` pre-serialized to JSON. Served verbatim by
+   * `providerSummaries` pre-serialized for the current revision. Served verbatim by
    * `/api/providers` so the response is neither re-serialized per request nor
    * able to drift from {@link providerSummariesEtag}.
    */
   providerSummariesJson: string;
   /**
-   * Stable ETag for `providerSummariesJson`. The catalog is immutable at
-   * runtime, so this is computed once and lets `/api/providers` answer
-   * conditional requests with `304 Not Modified`.
+   * Content-derived ETag for the current provider summaries. It lets
+   * `/api/providers` answer conditional requests with `304 Not Modified`.
    */
   providerSummariesEtag: string;
   actions: RuntimeActionDefinition[];
@@ -73,9 +74,53 @@ export interface LoadCatalogOptions {
   executableActionIds?: Iterable<string>;
 }
 
+interface StaticCatalogState {
+  providers: ProviderDefinition[];
+  executableActionIds: Set<string>;
+}
+
+const staticCatalogStates = new WeakMap<CatalogStore, StaticCatalogState>();
+
 export function createCatalogStore(providers: ProviderDefinition[], options: LoadCatalogOptions = {}): CatalogStore {
+  const executableActionIds = new Set(options.executableActionIds ?? []);
+  const catalog = buildCatalogStore(providers, executableActionIds, 0);
+  staticCatalogStates.set(catalog, {
+    providers: [...providers],
+    executableActionIds,
+  });
+  return catalog;
+}
+
+/**
+ * Replace all runtime-defined providers while retaining the generated catalog.
+ *
+ * The store object is updated in place so long-lived services observe the same
+ * catalog revision without rebuilding their dependency graph.
+ */
+export function replaceDynamicProviders(
+  catalog: CatalogStore,
+  providers: ProviderDefinition[],
+  executableActionIds: Iterable<string>,
+): void {
+  const staticState = staticCatalogStates.get(catalog);
+  if (!staticState) {
+    throw new Error("Catalog store was not created by createCatalogStore.");
+  }
+  const nextExecutableActionIds = new Set([...staticState.executableActionIds, ...executableActionIds]);
+  const next = buildCatalogStore(
+    [...staticState.providers, ...providers],
+    nextExecutableActionIds,
+    catalog.revision + 1,
+  );
+  Object.assign(catalog, next);
+}
+
+function buildCatalogStore(
+  providers: ProviderDefinition[],
+  executableActions: Set<string>,
+  revision: number,
+): CatalogStore {
   const sortedProviders = sortProviders(providers);
-  const executableActions = new Set(options.executableActionIds ?? []);
   const runtimeProviders = sortedProviders.map((provider): RuntimeProviderDefinition => {
     const actions = provider.actions.map(
       (action): RuntimeActionDefinition => ({
@@ -99,6 +144,7 @@ export function createCatalogStore(providers: ProviderDefinition[], options: Loa
   const providerSummariesJson = JSON.stringify(providerSummaries);
 
   return {
+    revision,
     providers: runtimeProviders,
     providerSummaries,
     providerSummariesJson,
@@ -112,8 +158,8 @@ export function createCatalogStore(providers: ProviderDefinition[], options: Loa
 /**
  * Content-derived ETag using a pure-JS FNV-1a hash. Runtime-agnostic (no
  * `node:crypto`, so the Cloudflare Workers build shares this path) and computed
- * once per catalog. Emitted as a weak validator because the response body may
- * be gzip-transformed downstream.
+ * once per catalog revision. Emitted as a weak validator because the response
+ * body may be gzip-transformed downstream.
  */
 function weakEtag(content: string): string {
   let hash = 0x811c_9dc5;

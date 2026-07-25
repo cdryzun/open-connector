@@ -2,6 +2,13 @@ import type { CatalogStore, RuntimeActionDefinition } from "../catalog-store.ts"
 import type { ConnectionService } from "../connection-service.ts";
 import type { ActionPolicySnapshot } from "../core/action-policy.ts";
 import type { ActionSearchIndexProvider, ActionSearchResult } from "../core/action-search.ts";
+import type { UpstreamMcpServerService } from "../mcp-upstream/mcp-server-service.ts";
+import type {
+  CreateUpstreamMcpServerInput,
+  SetUpstreamMcpToolsInput,
+  UpdateUpstreamMcpServerInput,
+  UpstreamMcpAuth,
+} from "../mcp-upstream/types.ts";
 import type { IProviderLoader } from "../providers/provider-loader.ts";
 import type { LocalAuthOptions } from "./api/auth.ts";
 import type { RuntimeActionHttpResult } from "./api/runtime-api.ts";
@@ -19,8 +26,21 @@ import { Hono } from "hono";
 import { compress } from "hono/compress";
 import { ConnectionError, defaultConnectionName } from "../connection-service.ts";
 import { ActionPolicyService, emptyPolicyRules } from "../core/action-policy.ts";
-import { DEFAULT_ACTION_SEARCH_LIMIT, createActionSearchIndexProvider, searchActions } from "../core/action-search.ts";
-import { optionalRecord, optionalString, requiredString } from "../core/cast.ts";
+import {
+  DEFAULT_ACTION_SEARCH_LIMIT,
+  createRevisionedActionSearchIndexProvider,
+  searchActions,
+} from "../core/action-search.ts";
+import {
+  optionalBoolean,
+  optionalInteger,
+  optionalRecord,
+  optionalString,
+  requiredString,
+  requiredStringArray,
+} from "../core/cast.ts";
+import { UpstreamMcpClientError } from "../mcp-upstream/mcp-client.ts";
+import { UpstreamMcpServerServiceError } from "../mcp-upstream/mcp-server-service.ts";
 import { createMcpServer, listMcpToolSummaries } from "../mcp.ts";
 import { OAuthClientConfigError, OAuthClientConfigService } from "../oauth/oauth-client-config-service.ts";
 import { OAuthFlowError, OAuthFlowService } from "../oauth/oauth-flow-service.ts";
@@ -72,6 +92,7 @@ export interface IConnectServerOptions {
   auth?: LocalAuthOptions;
   actionPolicy?: ActionPolicyService;
   runtimePolicyStore: IRuntimePolicyStore;
+  upstreamMcps?: UpstreamMcpServerService;
   actionSearch?: ActionSearchIndexProvider;
   registerStaticRoutes?: (app: Hono) => void;
   logger?: Logger;
@@ -90,7 +111,12 @@ export class ConnectServer {
 
   constructor(options: IConnectServerOptions) {
     this.options = options;
-    this.actionSearch = options.actionSearch ?? createActionSearchIndexProvider(options.catalog.actions);
+    this.actionSearch =
+      options.actionSearch ??
+      createRevisionedActionSearchIndexProvider({
+        getActions: () => options.catalog.actions,
+        getRevision: () => options.catalog.revision,
+      });
     this.actionPolicy = options.actionPolicy ?? new ActionPolicyService();
     this.proxyRunner = new ProxyRunner({
       catalog: options.catalog,
@@ -163,9 +189,9 @@ export class ConnectServer {
     );
 
     // Schema-free listing. The action detail view loads full schemas on demand
-    // from /api/actions/:actionId. The catalog is immutable at runtime, so the
-    // body and its ETag are precomputed and reused, and unchanged reloads get a
-    // 304 instead of re-downloading the payload.
+    // from /api/actions/:actionId. The body and its ETag are precomputed for
+    // each catalog revision, and unchanged reloads get a 304 instead of
+    // re-downloading the payload.
     app.get("/api/providers", (context) => this.listProviderSummaries(context));
     app.get("/api/providers/:service", (context) => this.getProvider(context, context.req.param("service")));
 
@@ -201,6 +227,28 @@ export class ConnectServer {
     app.delete("/api/oauth/configs/:service", (context) =>
       this.deleteOAuthConfig(context, context.req.param("service")),
     );
+    if (this.options.upstreamMcps) {
+      app.get("/api/mcp-servers", (context) => this.listUpstreamMcpServers(context));
+      app.post("/api/mcp-servers", (context) => this.createUpstreamMcpServer(context));
+      app.get("/api/mcp-servers/:service", (context) =>
+        this.getUpstreamMcpServer(context, context.req.param("service")),
+      );
+      app.put("/api/mcp-servers/:service", (context) =>
+        this.updateUpstreamMcpServer(context, context.req.param("service")),
+      );
+      app.delete("/api/mcp-servers/:service", (context) =>
+        this.deleteUpstreamMcpServer(context, context.req.param("service")),
+      );
+      app.get("/api/mcp-servers/:service/tools", (context) =>
+        this.listUpstreamMcpTools(context, context.req.param("service")),
+      );
+      app.post("/api/mcp-servers/:service/sync", (context) =>
+        this.syncUpstreamMcpServer(context, context.req.param("service")),
+      );
+      app.put("/api/mcp-servers/:service/tools", (context) =>
+        this.setUpstreamMcpTools(context, context.req.param("service")),
+      );
+    }
     app.post("/api/oauth/authorizations", (context) => this.createOAuthAuthorization(context));
     app.get("/oauth/callback", (context) => this.completeOAuth(context));
     app.post("/mcp", (context) => this.handleMcp(context));
@@ -1017,6 +1065,103 @@ export class ConnectServer {
     }
   }
 
+  private async listUpstreamMcpServers(context: Context): Promise<Response> {
+    return await this.writeUpstreamMcpResult(context, this.requireUpstreamMcps().listServers());
+  }
+
+  private async getUpstreamMcpServer(context: Context, service: string): Promise<Response> {
+    return await this.writeUpstreamMcpResult(context, this.requireUpstreamMcps().getServer(service));
+  }
+
+  private async listUpstreamMcpTools(context: Context, service: string): Promise<Response> {
+    const operation = this.requireUpstreamMcps()
+      .getServer(service)
+      .then((upstream) => ({
+        service,
+        revision: upstream.server.revision,
+        tools: upstream.tools,
+      }));
+    return await this.writeUpstreamMcpResult(context, operation);
+  }
+
+  private async createUpstreamMcpServer(context: Context): Promise<Response> {
+    const body = await readJsonBody(context, 64 * 1024);
+    const input = readCreateUpstreamMcpServerInput(body);
+    return await this.writeUpstreamMcpResult(
+      context,
+      this.requireUpstreamMcps().createServer(input.server, input.options),
+      201,
+    );
+  }
+
+  private async updateUpstreamMcpServer(context: Context, service: string): Promise<Response> {
+    const body = await readJsonBody(context, 64 * 1024);
+    const input = readUpdateUpstreamMcpServerInput(body);
+    return await this.writeUpstreamMcpResult(
+      context,
+      this.requireUpstreamMcps().updateServer(service, input.server, input.options),
+    );
+  }
+
+  private async deleteUpstreamMcpServer(context: Context, service: string): Promise<Response> {
+    return await this.writeUpstreamMcpResult(
+      context,
+      this.requireUpstreamMcps()
+        .deleteServer(service)
+        .then(() => ({ service, deleted: true })),
+    );
+  }
+
+  private async syncUpstreamMcpServer(context: Context, service: string): Promise<Response> {
+    const body = await readJsonBody(context, 16 * 1024);
+    return await this.writeUpstreamMcpResult(
+      context,
+      this.requireUpstreamMcps().syncServer(service, {
+        connectionName: optionalString(body.connectionName),
+      }),
+    );
+  }
+
+  private async setUpstreamMcpTools(context: Context, service: string): Promise<Response> {
+    const body = await readJsonBody(context, 64 * 1024);
+    const input: SetUpstreamMcpToolsInput = {
+      expectedRevision: requiredInteger(body.expectedRevision, "expectedRevision"),
+      enabledTools: requiredStringArray(body.enabledTools, "enabledTools", invalidMcpInput),
+    };
+    return await this.writeUpstreamMcpResult(context, this.requireUpstreamMcps().setEnabledTools(service, input));
+  }
+
+  private requireUpstreamMcps(): UpstreamMcpServerService {
+    if (!this.options.upstreamMcps) {
+      throw new Error("Upstream MCP service is unavailable.");
+    }
+    return this.options.upstreamMcps;
+  }
+
+  private async writeUpstreamMcpResult(
+    context: Context,
+    operation: Promise<unknown>,
+    successStatus: 200 | 201 = 200,
+  ): Promise<Response> {
+    try {
+      return context.json(await operation, successStatus);
+    } catch (error) {
+      if (error instanceof UpstreamMcpServerServiceError) {
+        return jsonError(context, error.status, error.code, error.message);
+      }
+      if (error instanceof UpstreamMcpClientError) {
+        return jsonError(context, 502, error.code, error.message);
+      }
+      if (error instanceof ConnectionError) {
+        return jsonError(context, error.code === "unknown_service" ? 404 : 400, error.code, error.message);
+      }
+      if (error instanceof HttpRequestError) {
+        return jsonError(context, error.status, error.code, error.message);
+      }
+      throw error;
+    }
+  }
+
   private getPolicySnapshot(context: Context): Promise<ActionPolicySnapshot> {
     const request = context.req.raw;
     let snapshot = this.policySnapshots.get(request);
@@ -1054,6 +1199,110 @@ interface ConnectionLogContext {
   service: string;
   authType?: string;
   connectionName?: string;
+}
+
+interface CreateUpstreamMcpServerRequest {
+  server: CreateUpstreamMcpServerInput;
+  options: {
+    credential?: string;
+    sync?: boolean;
+  };
+}
+
+interface UpdateUpstreamMcpServerRequest {
+  server: UpdateUpstreamMcpServerInput;
+  options: {
+    credential?: string;
+    sync?: boolean;
+  };
+}
+
+function readCreateUpstreamMcpServerInput(body: Record<string, unknown>): CreateUpstreamMcpServerRequest {
+  return {
+    server: {
+      slug: requiredString(body.slug, "slug", invalidMcpInput),
+      displayName: requiredString(body.displayName, "displayName", invalidMcpInput),
+      description: readOptionalBodyString(body, "description"),
+      endpoint: requiredString(body.endpoint, "endpoint", invalidMcpInput),
+      auth: readUpstreamMcpAuth(body.auth, true)!,
+    },
+    options: {
+      credential: readOptionalBodyString(body, "credential"),
+      sync: readOptionalBodyBoolean(body, "sync"),
+    },
+  };
+}
+
+function readUpdateUpstreamMcpServerInput(body: Record<string, unknown>): UpdateUpstreamMcpServerRequest {
+  return {
+    server: {
+      displayName: readOptionalBodyString(body, "displayName"),
+      description: readOptionalBodyString(body, "description", true),
+      endpoint: readOptionalBodyString(body, "endpoint"),
+      auth: readUpstreamMcpAuth(body.auth, false),
+      enabled: readOptionalBodyBoolean(body, "enabled"),
+    },
+    options: {
+      credential: readOptionalBodyString(body, "credential"),
+      sync: readOptionalBodyBoolean(body, "sync"),
+    },
+  };
+}
+
+function readUpstreamMcpAuth(value: unknown, required: boolean): UpstreamMcpAuth | undefined {
+  if (value === undefined && !required) {
+    return undefined;
+  }
+  const auth = optionalRecord(value);
+  if (!auth) {
+    throw invalidMcpInput("auth must be an object.");
+  }
+  const type = requiredString(auth.type, "auth.type", invalidMcpInput);
+  if (type === "none" || type === "bearer") {
+    return { type };
+  }
+  if (type === "api_key_header") {
+    return {
+      type,
+      headerName: requiredString(auth.headerName, "auth.headerName", invalidMcpInput),
+    };
+  }
+  throw invalidMcpInput("auth.type must be none, bearer, or api_key_header.");
+}
+
+function readOptionalBodyString(body: Record<string, unknown>, key: string, preserveEmpty = false): string | undefined {
+  const value = body[key];
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "string") {
+    throw invalidMcpInput(`${key} must be a string.`);
+  }
+  return preserveEmpty ? value : optionalString(value);
+}
+
+function readOptionalBodyBoolean(body: Record<string, unknown>, key: string): boolean | undefined {
+  const value = body[key];
+  if (value === undefined) {
+    return undefined;
+  }
+  const boolean = optionalBoolean(value);
+  if (boolean === undefined) {
+    throw invalidMcpInput(`${key} must be a boolean.`);
+  }
+  return boolean;
+}
+
+function requiredInteger(value: unknown, fieldName: string): number {
+  const integer = optionalInteger(value);
+  if (integer === undefined) {
+    throw invalidMcpInput(`${fieldName} must be an integer.`);
+  }
+  return integer;
+}
+
+function invalidMcpInput(message: string): HttpRequestError {
+  return new HttpRequestError("invalid_input", message);
 }
 
 /**

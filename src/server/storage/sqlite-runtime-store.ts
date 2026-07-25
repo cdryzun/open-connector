@@ -1,6 +1,18 @@
 import type { IConnectionStore, StoredConnection } from "../../connection-service.ts";
 import type { TokenActionPolicy } from "../../core/action-policy.ts";
 import type { ResolvedCredential, RuntimeLogger } from "../../core/types.ts";
+import type {
+  ApplyUpstreamMcpSyncInput,
+  IUpstreamMcpServerStore,
+  SetUpstreamMcpToolsStoreInput,
+} from "../../mcp-upstream/mcp-server-store.ts";
+import type {
+  UpstreamMcpServer,
+  UpstreamMcpServerWithTools,
+  UpstreamMcpSyncResult,
+  UpstreamMcpTool,
+  UpstreamMcpToolSelectionResult,
+} from "../../mcp-upstream/types.ts";
 import type { IOAuthClientConfigStore, OAuthClientConfig } from "../../oauth/oauth-client-config-service.ts";
 import type { IOAuthStateStore, OAuthAuthorizationState } from "../../oauth/oauth-flow-service.ts";
 import type { ISecretCodec } from "../secrets/secret-codec-core.ts";
@@ -17,6 +29,13 @@ import type { IRuntimeTokenStore, RuntimeTokenRecord } from "./runtime-token-ser
 
 import { readFileSync, readdirSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
+import {
+  readUpstreamMcpInteger,
+  readUpstreamMcpServerRow,
+  readUpstreamMcpToolRow,
+  upstreamMcpServerValues,
+  upstreamMcpToolValues,
+} from "../../mcp-upstream/storage-codec.ts";
 import { parseRuntimeActionHttpResult } from "../api/runtime-api.ts";
 import { PlainTextSecretCodec } from "../secrets/secret-codec-core.ts";
 import { DEFAULT_RUN_LIMIT, decodeRunLogCursor, encodeRunLogCursor } from "./runtime-store.ts";
@@ -69,6 +88,7 @@ export class SqliteRuntimeDatabase implements RuntimeDatabase {
   readonly runtimePolicyStore: SqliteRuntimePolicyStore;
   readonly runLogStore: SqliteRunLogStore;
   readonly idempotencyStore: SqliteIdempotencyStore;
+  readonly upstreamMcpServerStore: SqliteUpstreamMcpServerStore;
 
   private readonly database: DatabaseSync;
   private readonly secretCodec: ISecretCodec;
@@ -84,6 +104,7 @@ export class SqliteRuntimeDatabase implements RuntimeDatabase {
     this.runtimePolicyStore = new SqliteRuntimePolicyStore(this.database);
     this.runLogStore = new SqliteRunLogStore(this.database, options.runLimit ?? DEFAULT_RUN_LIMIT);
     this.idempotencyStore = new SqliteIdempotencyStore(this.database, this.secretCodec);
+    this.upstreamMcpServerStore = new SqliteUpstreamMcpServerStore(this.database);
   }
 
   close(): void {
@@ -115,12 +136,249 @@ export class SqliteRuntimeDatabase implements RuntimeDatabase {
       delete from runtime_policy;
       delete from runs;
       delete from idempotency_records;
+      delete from mcp_server_tools;
+      delete from mcp_servers;
+      update mcp_catalog_state set revision = 0, updated_at = '1970-01-01T00:00:00.000Z' where id = 1;
     `);
   }
 
   private initialize(logger?: RuntimeLogger): void {
     this.database.exec("pragma journal_mode = wal;");
     runSqliteMigrations(this.database, logger);
+  }
+}
+
+export class SqliteUpstreamMcpServerStore implements IUpstreamMcpServerStore {
+  private readonly database: DatabaseSync;
+
+  constructor(database: DatabaseSync) {
+    this.database = database;
+  }
+
+  async getCatalogRevision(): Promise<number> {
+    const row = this.database.prepare("select revision from mcp_catalog_state where id = 1").get();
+    return readUpstreamMcpInteger(row, "revision");
+  }
+
+  async listServers(): Promise<UpstreamMcpServer[]> {
+    return this.database
+      .prepare("select * from mcp_servers order by display_name, service")
+      .all()
+      .map(readUpstreamMcpServerRow);
+  }
+
+  async getServer(service: string): Promise<UpstreamMcpServer | undefined> {
+    const row = this.database.prepare("select * from mcp_servers where service = ?").get(service);
+    return row ? readUpstreamMcpServerRow(row) : undefined;
+  }
+
+  async getServerWithTools(service: string): Promise<UpstreamMcpServerWithTools | undefined> {
+    const server = await this.getServer(service);
+    if (!server) {
+      return undefined;
+    }
+    return {
+      server,
+      tools: this.listTools(service),
+    };
+  }
+
+  async listEnabledServersWithTools(): Promise<UpstreamMcpServerWithTools[]> {
+    const servers = this.database
+      .prepare("select * from mcp_servers where enabled = 1 order by service")
+      .all()
+      .map(readUpstreamMcpServerRow);
+    return servers.map((server) => ({
+      server,
+      tools: this.listTools(server.service).filter((tool) => tool.enabled && tool.status === "available"),
+    }));
+  }
+
+  async createServer(server: UpstreamMcpServer): Promise<boolean> {
+    try {
+      runInTransaction(this.database, () => {
+        this.insertServer(server);
+        incrementMcpCatalogRevision(this.database, server.updatedAt);
+      });
+      return true;
+    } catch (error) {
+      if (isSqliteConstraintError(error)) {
+        return false;
+      }
+      throw error;
+    }
+  }
+
+  async updateServer(server: UpstreamMcpServer): Promise<boolean> {
+    return runInTransaction(this.database, () => {
+      const result = this.database
+        .prepare(
+          `
+          update mcp_servers
+          set display_name = ?, description = ?, endpoint = ?, auth_type = ?, header_name = ?,
+              enabled = ?, revision = ?, sync_status = ?, last_sync_at = ?, last_sync_error = ?,
+              updated_at = ?, mutation_token = ?
+          where service = ?
+        `,
+        )
+        .run(
+          server.displayName,
+          server.description ?? null,
+          server.endpoint,
+          server.auth.type,
+          server.auth.type === "api_key_header" ? server.auth.headerName : null,
+          server.enabled ? 1 : 0,
+          server.revision,
+          server.syncStatus,
+          server.lastSyncAt ?? null,
+          server.lastSyncError ?? null,
+          server.updatedAt,
+          crypto.randomUUID(),
+          server.service,
+        );
+      if (result.changes === 0) {
+        return false;
+      }
+      incrementMcpCatalogRevision(this.database, server.updatedAt);
+      return true;
+    });
+  }
+
+  async deleteServer(service: string): Promise<boolean> {
+    return runInTransaction(this.database, () => {
+      this.database.prepare("delete from mcp_server_tools where service = ?").run(service);
+      this.database.prepare("delete from connections where service = ?").run(service);
+      const result = this.database.prepare("delete from mcp_servers where service = ?").run(service);
+      if (result.changes === 0) {
+        return false;
+      }
+      incrementMcpCatalogRevision(this.database, new Date().toISOString());
+      return true;
+    });
+  }
+
+  async applySync(input: ApplyUpstreamMcpSyncInput): Promise<UpstreamMcpSyncResult | undefined> {
+    return runInTransaction(this.database, () => {
+      const serverRow = this.database
+        .prepare("select revision from mcp_servers where service = ?")
+        .get(input.server.service);
+      if (!serverRow || readUpstreamMcpInteger(serverRow, "revision") !== input.expectedRevision) {
+        return undefined;
+      }
+      this.database.prepare("delete from mcp_server_tools where service = ?").run(input.server.service);
+      const statement = this.database.prepare(
+        `
+        insert into mcp_server_tools (
+          service, upstream_name, action_name, title, description, input_schema, output_schema, annotations,
+          contract_hash, enabled, status, invalid_reason, first_seen_at, last_seen_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      );
+      for (const tool of input.tools) {
+        statement.run(...upstreamMcpToolValues(tool));
+      }
+      this.upsertServer(input.server);
+      incrementMcpCatalogRevision(this.database, input.result.syncedAt);
+      return { ...input.result, revision: input.server.revision };
+    });
+  }
+
+  async recordSyncError(
+    service: string,
+    expectedRevision: number,
+    message: string,
+    updatedAt: string,
+  ): Promise<boolean> {
+    const result = this.database
+      .prepare(
+        `
+        update mcp_servers
+        set sync_status = 'error', last_sync_error = ?, updated_at = ?
+        where service = ? and revision = ?
+      `,
+      )
+      .run(message, updatedAt, service, expectedRevision);
+    return result.changes > 0;
+  }
+
+  async setEnabledTools(input: SetUpstreamMcpToolsStoreInput): Promise<UpstreamMcpToolSelectionResult | undefined> {
+    return runInTransaction(this.database, () => {
+      const row = this.database.prepare("select revision from mcp_servers where service = ?").get(input.service);
+      if (!row || readUpstreamMcpInteger(row, "revision") !== input.expectedRevision) {
+        return undefined;
+      }
+      const available = new Set(
+        this.database
+          .prepare("select upstream_name from mcp_server_tools where service = ? and status != 'removed'")
+          .all(input.service)
+          .map((toolRow) => readString(toolRow, "upstream_name")),
+      );
+      if (input.enabledTools.some((toolName) => !available.has(toolName))) {
+        return undefined;
+      }
+      this.database.prepare("update mcp_server_tools set enabled = 0 where service = ?").run(input.service);
+      const enable = this.database.prepare(
+        "update mcp_server_tools set enabled = 1, status = 'available' where service = ? and upstream_name = ?",
+      );
+      for (const toolName of input.enabledTools) {
+        enable.run(input.service, toolName);
+      }
+      const nextServerRevision = input.expectedRevision + 1;
+      this.database
+        .prepare("update mcp_servers set revision = ?, updated_at = ? where service = ?")
+        .run(nextServerRevision, input.updatedAt, input.service);
+      incrementMcpCatalogRevision(this.database, input.updatedAt);
+      return {
+        service: input.service,
+        revision: nextServerRevision,
+        enabledTools: [...input.enabledTools].sort(),
+      };
+    });
+  }
+
+  private listTools(service: string): UpstreamMcpTool[] {
+    return this.database
+      .prepare("select * from mcp_server_tools where service = ? order by upstream_name")
+      .all(service)
+      .map(readUpstreamMcpToolRow);
+  }
+
+  private insertServer(server: UpstreamMcpServer): void {
+    this.database
+      .prepare(
+        `
+        insert into mcp_servers (
+          service, slug, display_name, description, endpoint, auth_type, header_name, enabled, revision,
+          sync_status, last_sync_at, last_sync_error, created_at, updated_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      )
+      .run(...upstreamMcpServerValues(server));
+  }
+
+  private upsertServer(server: UpstreamMcpServer): void {
+    this.database
+      .prepare(
+        `
+        insert into mcp_servers (
+          service, slug, display_name, description, endpoint, auth_type, header_name, enabled, revision,
+          sync_status, last_sync_at, last_sync_error, created_at, updated_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        on conflict(service) do update set
+          display_name = excluded.display_name,
+          description = excluded.description,
+          endpoint = excluded.endpoint,
+          auth_type = excluded.auth_type,
+          header_name = excluded.header_name,
+          enabled = excluded.enabled,
+          revision = excluded.revision,
+          sync_status = excluded.sync_status,
+          last_sync_at = excluded.last_sync_at,
+          last_sync_error = excluded.last_sync_error,
+          updated_at = excluded.updated_at
+      `,
+      )
+      .run(...upstreamMcpServerValues(server));
   }
 }
 
@@ -782,6 +1040,24 @@ function readOptionalString(row: unknown, key: string): string | undefined {
   }
 
   return value;
+}
+
+function incrementMcpCatalogRevision(database: DatabaseSync, updatedAt: string): number {
+  const row = database
+    .prepare(
+      `
+      update mcp_catalog_state
+      set revision = revision + 1, updated_at = ?
+      where id = 1
+      returning revision
+    `,
+    )
+    .get(updatedAt);
+  return readUpstreamMcpInteger(row, "revision");
+}
+
+function isSqliteConstraintError(error: unknown): boolean {
+  return error instanceof Error && "code" in error && String(error.code).startsWith("SQLITE_CONSTRAINT");
 }
 
 function parseJson<T>(value: string): T {

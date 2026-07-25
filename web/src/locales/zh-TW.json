@@ -40,6 +40,7 @@
   "nav": {
     "overview": "總覽",
     "providers": "服務提供者",
+    "mcpServers": "MCP 伺服器",
     "actions": "動作",
     "runs": "執行記錄",
     "access": "API 金鑰",
@@ -66,6 +67,10 @@
       "providers": {
         "title": "服務提供者",
         "subtitle": "連線至服務提供者並檢視其功能。"
+      },
+      "mcpServers": {
+        "title": "MCP 伺服器",
+        "subtitle": "設定上游 MCP 伺服器與已發佈工具。"
       },
       "actions": {
         "title": "動作",
@@ -118,6 +123,56 @@
     "callCountMany": "{{count}} 次呼叫",
     "noRecentCallsTitle": "沒有近期呼叫",
     "noRecentCallsDescription": "執行一個動作以查看服務提供者的呼叫次數。"
+  },
+  "mcpServers": {
+    "title": "上游 MCP 伺服器",
+    "description": "連接 Streamable HTTP MCP 伺服器，將審核通過的工具發佈為動作。",
+    "add": "新增伺服器",
+    "create": "建立並同步",
+    "creating": "正在建立並同步 MCP 伺服器...",
+    "created": "MCP 伺服器已建立。",
+    "sync": "同步",
+    "syncing": "正在同步工具契約...",
+    "synced": "工具契約已同步。",
+    "enable": "啟用",
+    "disable": "停用",
+    "delete": "刪除",
+    "deleteConfirm": "刪除 {{name}} 及其已儲存的連線嗎？",
+    "revision": "修訂版本",
+    "reviewRequired": "需要審核",
+    "tools": "已發佈工具",
+    "toolsDescription": "新增及變更的工具會維持停用，直到您核准為止。",
+    "saveTools": "儲存工具選擇",
+    "savingTools": "正在儲存工具選擇...",
+    "toolsSaved": "工具選擇已儲存。",
+    "emptyTitle": "沒有上游 MCP 伺服器",
+    "emptyDescription": "新增 Streamable HTTP 端點，讓 Agent 使用核准的工具。",
+    "noToolsTitle": "尚未發現工具",
+    "noToolsDescription": "請同步伺服器以載入工具契約。",
+    "fields": {
+      "name": "顯示名稱",
+      "slug": "代稱",
+      "endpoint": "MCP 端點",
+      "auth": "驗證",
+      "headerName": "API Key 標頭",
+      "credential": "憑證"
+    },
+    "auth": {
+      "none": "無需驗證",
+      "bearer": "Bearer Token",
+      "apiKeyHeader": "自訂 API Key 標頭"
+    },
+    "syncStatus": {
+      "never": "尚未同步",
+      "ok": "已同步",
+      "error": "同步失敗"
+    },
+    "toolStatus": {
+      "available": "可用",
+      "review_required": "需要審核",
+      "removed": "上游已移除",
+      "invalid": "契約無效"
+    }
   },
   "providers": {
     "catalogTitle": "服務提供者",

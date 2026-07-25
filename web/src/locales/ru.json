@@ -40,6 +40,7 @@
   "nav": {
     "overview": "Обзор",
     "providers": "Провайдеры",
+    "mcpServers": "MCP-серверы",
     "actions": "Действия",
     "runs": "Запуски",
     "access": "API Key",
@@ -66,6 +67,10 @@
       "providers": {
         "title": "Провайдеры",
         "subtitle": "Подключайте провайдеры и проверяйте их возможности."
+      },
+      "mcpServers": {
+        "title": "MCP-серверы",
+        "subtitle": "Настройка внешних MCP-серверов и опубликованных инструментов."
       },
       "actions": {
         "title": "Действия",
@@ -118,6 +123,56 @@
     "callCountMany": "{{count}} вызовов",
     "noRecentCallsTitle": "Недавних вызовов нет",
     "noRecentCallsDescription": "Запустите действие, чтобы увидеть вызовы по провайдерам."
+  },
+  "mcpServers": {
+    "title": "Внешние MCP-серверы",
+    "description": "Подключайте MCP-серверы Streamable HTTP и публикуйте одобренные инструменты как действия.",
+    "add": "Добавить сервер",
+    "create": "Создать и синхронизировать",
+    "creating": "Создание и синхронизация MCP-сервера...",
+    "created": "MCP-сервер создан.",
+    "sync": "Синхронизировать",
+    "syncing": "Синхронизация контрактов инструментов...",
+    "synced": "Контракты инструментов синхронизированы.",
+    "enable": "Включить",
+    "disable": "Отключить",
+    "delete": "Удалить",
+    "deleteConfirm": "Удалить {{name}} и сохранённые подключения?",
+    "revision": "Ревизия",
+    "reviewRequired": "Требуется проверка",
+    "tools": "Опубликованные инструменты",
+    "toolsDescription": "Новые и изменённые инструменты отключены до одобрения.",
+    "saveTools": "Сохранить выбор",
+    "savingTools": "Сохранение выбора инструментов...",
+    "toolsSaved": "Выбор инструментов сохранён.",
+    "emptyTitle": "Нет внешних MCP-серверов",
+    "emptyDescription": "Добавьте endpoint Streamable HTTP, чтобы предоставить Agent одобренные инструменты.",
+    "noToolsTitle": "Инструменты не обнаружены",
+    "noToolsDescription": "Синхронизируйте сервер для загрузки контрактов.",
+    "fields": {
+      "name": "Отображаемое имя",
+      "slug": "Slug",
+      "endpoint": "MCP endpoint",
+      "auth": "Аутентификация",
+      "headerName": "Заголовок API Key",
+      "credential": "Учётные данные"
+    },
+    "auth": {
+      "none": "Без аутентификации",
+      "bearer": "Bearer Token",
+      "apiKeyHeader": "Пользовательский заголовок API Key"
+    },
+    "syncStatus": {
+      "never": "Не синхронизирован",
+      "ok": "Синхронизирован",
+      "error": "Ошибка синхронизации"
+    },
+    "toolStatus": {
+      "available": "Доступен",
+      "review_required": "Требуется проверка",
+      "removed": "Удалён на сервере",
+      "invalid": "Недопустимый контракт"
+    }
   },
   "providers": {
     "catalogTitle": "Провайдеры",

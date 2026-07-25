@@ -166,7 +166,32 @@ function memoryAssets(files: Record<string, unknown>): AssetsBinding {
 
 class UnusedD1Database implements D1DatabaseBinding {
   prepare(query: string): D1PreparedStatementBinding {
+    if (query === "select * from mcp_servers order by display_name, service") {
+      return new EmptyD1PreparedStatement();
+    }
     throw new Error(`Unexpected D1 query: ${query}`);
+  }
+
+  async batch(): Promise<never> {
+    throw new Error("Unexpected D1 batch");
+  }
+}
+
+class EmptyD1PreparedStatement implements D1PreparedStatementBinding {
+  bind(): D1PreparedStatementBinding {
+    return this;
+  }
+
+  async first<T>(): Promise<T | null> {
+    return null;
+  }
+
+  async all<T>(): Promise<{ results: T[] }> {
+    return { results: [] };
+  }
+
+  async run(): Promise<never> {
+    throw new Error("Unexpected D1 statement run");
   }
 }
 

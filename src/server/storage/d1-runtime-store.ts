@@ -1,6 +1,18 @@
 import type { IConnectionStore, StoredConnection } from "../../connection-service.ts";
 import type { TokenActionPolicy } from "../../core/action-policy.ts";
 import type { ResolvedCredential } from "../../core/types.ts";
+import type {
+  ApplyUpstreamMcpSyncInput,
+  IUpstreamMcpServerStore,
+  SetUpstreamMcpToolsStoreInput,
+} from "../../mcp-upstream/mcp-server-store.ts";
+import type {
+  UpstreamMcpServer,
+  UpstreamMcpServerWithTools,
+  UpstreamMcpSyncResult,
+  UpstreamMcpTool,
+  UpstreamMcpToolSelectionResult,
+} from "../../mcp-upstream/types.ts";
 import type { IOAuthClientConfigStore, OAuthClientConfig } from "../../oauth/oauth-client-config-service.ts";
 import type { IOAuthStateStore, OAuthAuthorizationState } from "../../oauth/oauth-flow-service.ts";
 import type { D1DatabaseBinding } from "../cloudflare/cloudflare-bindings.ts";
@@ -16,6 +28,13 @@ import type { IRuntimePolicyStore, RuntimePolicyRecord } from "./runtime-policy-
 import type { IRunLogStore, RunLog, RunLogListInput, RunLogPage, RunLogWriteResult } from "./runtime-store.ts";
 import type { IRuntimeTokenStore, RuntimeTokenRecord } from "./runtime-token-service.ts";
 
+import {
+  readUpstreamMcpInteger,
+  readUpstreamMcpServerRow,
+  readUpstreamMcpToolRow,
+  upstreamMcpServerValues,
+  upstreamMcpToolValues,
+} from "../../mcp-upstream/storage-codec.ts";
 import { parseRuntimeActionHttpResult } from "../api/runtime-api.ts";
 import { PlainTextSecretCodec } from "../secrets/secret-codec-core.ts";
 import { DEFAULT_RUN_LIMIT, decodeRunLogCursor, encodeRunLogCursor } from "./runtime-store.ts";
@@ -36,6 +55,7 @@ export class D1RuntimeDatabase implements RuntimeDatabase {
   readonly runtimePolicyStore: D1RuntimePolicyStore;
   readonly runLogStore: D1RunLogStore;
   readonly idempotencyStore: D1IdempotencyStore;
+  readonly upstreamMcpServerStore: D1UpstreamMcpServerStore;
 
   constructor(database: D1DatabaseBinding, options: D1RuntimeDatabaseOptions = {}) {
     const secretCodec = options.secretCodec ?? new PlainTextSecretCodec();
@@ -46,6 +66,312 @@ export class D1RuntimeDatabase implements RuntimeDatabase {
     this.runtimePolicyStore = new D1RuntimePolicyStore(database);
     this.runLogStore = new D1RunLogStore(database, options.runLimit ?? DEFAULT_RUN_LIMIT);
     this.idempotencyStore = new D1IdempotencyStore(database, secretCodec);
+    this.upstreamMcpServerStore = new D1UpstreamMcpServerStore(database);
+  }
+}
+
+export class D1UpstreamMcpServerStore implements IUpstreamMcpServerStore {
+  private readonly database: D1DatabaseBinding;
+
+  constructor(database: D1DatabaseBinding) {
+    this.database = database;
+  }
+
+  async getCatalogRevision(): Promise<number> {
+    const row = await this.database.prepare("select revision from mcp_catalog_state where id = 1").first<RuntimeRow>();
+    return readUpstreamMcpInteger(row, "revision");
+  }
+
+  async listServers(): Promise<UpstreamMcpServer[]> {
+    const { results } = await this.database
+      .prepare("select * from mcp_servers order by display_name, service")
+      .all<RuntimeRow>();
+    return results.map(readUpstreamMcpServerRow);
+  }
+
+  async getServer(service: string): Promise<UpstreamMcpServer | undefined> {
+    const row = await this.database
+      .prepare("select * from mcp_servers where service = ?")
+      .bind(service)
+      .first<RuntimeRow>();
+    return row ? readUpstreamMcpServerRow(row) : undefined;
+  }
+
+  async getServerWithTools(service: string): Promise<UpstreamMcpServerWithTools | undefined> {
+    const server = await this.getServer(service);
+    if (!server) {
+      return undefined;
+    }
+    return { server, tools: await this.listTools(service) };
+  }
+
+  async listEnabledServersWithTools(): Promise<UpstreamMcpServerWithTools[]> {
+    const { results } = await this.database
+      .prepare("select * from mcp_servers where enabled = 1 order by service")
+      .all<RuntimeRow>();
+    return await Promise.all(
+      results.map(async (row) => {
+        const server = readUpstreamMcpServerRow(row);
+        const tools = await this.listTools(server.service);
+        return {
+          server,
+          tools: tools.filter((tool) => tool.enabled && tool.status === "available"),
+        };
+      }),
+    );
+  }
+
+  async createServer(server: UpstreamMcpServer): Promise<boolean> {
+    try {
+      await this.database.batch([
+        this.bindServerInsert(server),
+        this.database
+          .prepare(
+            "update mcp_catalog_state set revision = revision + 1, updated_at = ? where id = 1 and changes() > 0",
+          )
+          .bind(server.updatedAt),
+      ]);
+      return true;
+    } catch (error) {
+      if (isD1ConstraintError(error)) {
+        return false;
+      }
+      throw error;
+    }
+  }
+
+  async updateServer(server: UpstreamMcpServer): Promise<boolean> {
+    const results = await this.database.batch([
+      this.database
+        .prepare(
+          `
+          update mcp_servers
+          set display_name = ?, description = ?, endpoint = ?, auth_type = ?, header_name = ?,
+              enabled = ?, revision = ?, sync_status = ?, last_sync_at = ?, last_sync_error = ?,
+              updated_at = ?, mutation_token = ?
+          where service = ?
+        `,
+        )
+        .bind(
+          server.displayName,
+          server.description ?? null,
+          server.endpoint,
+          server.auth.type,
+          server.auth.type === "api_key_header" ? server.auth.headerName : null,
+          server.enabled ? 1 : 0,
+          server.revision,
+          server.syncStatus,
+          server.lastSyncAt ?? null,
+          server.lastSyncError ?? null,
+          server.updatedAt,
+          crypto.randomUUID(),
+          server.service,
+        ),
+      this.database
+        .prepare("update mcp_catalog_state set revision = revision + 1, updated_at = ? where id = 1 and changes() > 0")
+        .bind(server.updatedAt),
+    ]);
+    return (results[0]?.meta.changes ?? 0) > 0;
+  }
+
+  async deleteServer(service: string): Promise<boolean> {
+    const results = await this.database.batch([
+      this.database.prepare("delete from mcp_server_tools where service = ?").bind(service),
+      this.database.prepare("delete from connections where service = ?").bind(service),
+      this.database.prepare("delete from mcp_servers where service = ?").bind(service),
+      this.database
+        .prepare("update mcp_catalog_state set revision = revision + 1, updated_at = ? where id = 1 and changes() > 0")
+        .bind(new Date().toISOString()),
+    ]);
+    return (results[2]?.meta.changes ?? 0) > 0;
+  }
+
+  async applySync(input: ApplyUpstreamMcpSyncInput): Promise<UpstreamMcpSyncResult | undefined> {
+    const mutationToken = crypto.randomUUID();
+    const statements = [
+      this.bindServerSyncUpdate(input.server, input.expectedRevision, mutationToken),
+      this.database
+        .prepare(
+          `
+          delete from mcp_server_tools
+          where service = ?
+            and exists (select 1 from mcp_servers where service = ? and mutation_token = ?)
+        `,
+        )
+        .bind(input.server.service, input.server.service, mutationToken),
+      ...input.tools.map((tool) => this.bindConditionalToolInsert(tool, mutationToken)),
+      this.database
+        .prepare(
+          `
+          update mcp_catalog_state
+          set revision = revision + 1, updated_at = ?
+          where id = 1
+            and exists (select 1 from mcp_servers where service = ? and mutation_token = ?)
+        `,
+        )
+        .bind(input.result.syncedAt, input.server.service, mutationToken),
+    ];
+    const results = await this.database.batch(statements);
+    if ((results[0]?.meta.changes ?? 0) === 0) {
+      return undefined;
+    }
+    return { ...input.result, revision: input.server.revision };
+  }
+
+  async recordSyncError(
+    service: string,
+    expectedRevision: number,
+    message: string,
+    updatedAt: string,
+  ): Promise<boolean> {
+    const result = await this.database
+      .prepare(
+        `
+        update mcp_servers
+        set sync_status = 'error', last_sync_error = ?, updated_at = ?, mutation_token = ?
+        where service = ? and revision = ?
+      `,
+      )
+      .bind(message, updatedAt, crypto.randomUUID(), service, expectedRevision)
+      .run();
+    return (result.meta.changes ?? 0) > 0;
+  }
+
+  async setEnabledTools(input: SetUpstreamMcpToolsStoreInput): Promise<UpstreamMcpToolSelectionResult | undefined> {
+    const server = await this.getServer(input.service);
+    if (!server || server.revision !== input.expectedRevision) {
+      return undefined;
+    }
+    const tools = await this.listTools(input.service);
+    const available = new Set(tools.filter((tool) => tool.status !== "removed").map((tool) => tool.upstreamName));
+    if (input.enabledTools.some((toolName) => !available.has(toolName))) {
+      return undefined;
+    }
+
+    const nextRevision = input.expectedRevision + 1;
+    const mutationToken = crypto.randomUUID();
+    const statements = [
+      this.database
+        .prepare(
+          `
+          update mcp_servers
+          set revision = ?, updated_at = ?, mutation_token = ?
+          where service = ? and revision = ?
+        `,
+        )
+        .bind(nextRevision, input.updatedAt, mutationToken, input.service, input.expectedRevision),
+      this.database
+        .prepare(
+          `
+          update mcp_server_tools
+          set enabled = 0
+          where service = ?
+            and exists (
+              select 1 from mcp_servers where service = ? and mutation_token = ?
+            )
+        `,
+        )
+        .bind(input.service, input.service, mutationToken),
+      ...input.enabledTools.map((toolName) =>
+        this.database
+          .prepare(
+            `
+            update mcp_server_tools
+            set enabled = 1, status = 'available'
+            where service = ? and upstream_name = ?
+              and exists (
+                select 1 from mcp_servers where service = ? and mutation_token = ?
+              )
+          `,
+          )
+          .bind(input.service, toolName, input.service, mutationToken),
+      ),
+      this.database
+        .prepare(
+          `
+          update mcp_catalog_state
+          set revision = revision + 1, updated_at = ?
+          where id = 1 and exists (
+            select 1 from mcp_servers where service = ? and mutation_token = ?
+          )
+        `,
+        )
+        .bind(input.updatedAt, input.service, mutationToken),
+    ];
+    const results = await this.database.batch(statements);
+    if ((results[0]?.meta.changes ?? 0) === 0) {
+      return undefined;
+    }
+    return {
+      service: input.service,
+      revision: nextRevision,
+      enabledTools: [...input.enabledTools].sort(),
+    };
+  }
+
+  private async listTools(service: string): Promise<UpstreamMcpTool[]> {
+    const { results } = await this.database
+      .prepare("select * from mcp_server_tools where service = ? order by upstream_name")
+      .bind(service)
+      .all<RuntimeRow>();
+    return results.map(readUpstreamMcpToolRow);
+  }
+
+  private bindServerInsert(server: UpstreamMcpServer) {
+    return this.database
+      .prepare(
+        `
+        insert into mcp_servers (
+          service, slug, display_name, description, endpoint, auth_type, header_name, enabled, revision,
+          sync_status, last_sync_at, last_sync_error, created_at, updated_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      )
+      .bind(...upstreamMcpServerValues(server));
+  }
+
+  private bindServerSyncUpdate(server: UpstreamMcpServer, expectedRevision: number, mutationToken: string) {
+    return this.database
+      .prepare(
+        `
+        update mcp_servers
+        set display_name = ?, description = ?, endpoint = ?, auth_type = ?, header_name = ?,
+            enabled = ?, revision = ?, sync_status = ?, last_sync_at = ?, last_sync_error = ?,
+            updated_at = ?, mutation_token = ?
+        where service = ? and revision = ?
+      `,
+      )
+      .bind(
+        server.displayName,
+        server.description ?? null,
+        server.endpoint,
+        server.auth.type,
+        server.auth.type === "api_key_header" ? server.auth.headerName : null,
+        server.enabled ? 1 : 0,
+        server.revision,
+        server.syncStatus,
+        server.lastSyncAt ?? null,
+        server.lastSyncError ?? null,
+        server.updatedAt,
+        mutationToken,
+        server.service,
+        expectedRevision,
+      );
+  }
+
+  private bindConditionalToolInsert(tool: UpstreamMcpTool, mutationToken: string) {
+    return this.database
+      .prepare(
+        `
+        insert into mcp_server_tools (
+          service, upstream_name, action_name, title, description, input_schema, output_schema, annotations,
+          contract_hash, enabled, status, invalid_reason, first_seen_at, last_seen_at
+        )
+        select ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        where exists (select 1 from mcp_servers where service = ? and mutation_token = ?)
+      `,
+      )
+      .bind(...upstreamMcpToolValues(tool), tool.service, mutationToken);
   }
 }
 
@@ -549,6 +875,10 @@ function readOptionalString(row: RuntimeRow, key: string): string | undefined {
   }
 
   return value;
+}
+
+function isD1ConstraintError(error: unknown): boolean {
+  return error instanceof Error && /constraint|unique/i.test(error.message);
 }
 
 function parseJson<T>(value: string): T {

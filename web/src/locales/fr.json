@@ -40,6 +40,7 @@
   "nav": {
     "overview": "Vue d’ensemble",
     "providers": "Fournisseurs",
+    "mcpServers": "Serveurs MCP",
     "actions": "Actions",
     "runs": "Exécutions",
     "access": "API Key",
@@ -66,6 +67,10 @@
       "providers": {
         "title": "Fournisseurs",
         "subtitle": "Connectez des fournisseurs et examinez leurs capacités."
+      },
+      "mcpServers": {
+        "title": "Serveurs MCP",
+        "subtitle": "Configurez les serveurs MCP en amont et les outils publiés."
       },
       "actions": {
         "title": "Actions",
@@ -118,6 +123,56 @@
     "callCountMany": "{{count}} appels",
     "noRecentCallsTitle": "Aucun appel récent",
     "noRecentCallsDescription": "Exécutez une action pour voir les appels par fournisseur."
+  },
+  "mcpServers": {
+    "title": "Serveurs MCP en amont",
+    "description": "Connectez des serveurs MCP Streamable HTTP et publiez les outils approuvés comme actions.",
+    "add": "Ajouter un serveur",
+    "create": "Créer et synchroniser",
+    "creating": "Création et synchronisation du serveur MCP...",
+    "created": "Serveur MCP créé.",
+    "sync": "Synchroniser",
+    "syncing": "Synchronisation des contrats d’outils...",
+    "synced": "Contrats d’outils synchronisés.",
+    "enable": "Activer",
+    "disable": "Désactiver",
+    "delete": "Supprimer",
+    "deleteConfirm": "Supprimer {{name}} et ses connexions enregistrées ?",
+    "revision": "Révision",
+    "reviewRequired": "Révision requise",
+    "tools": "Outils publiés",
+    "toolsDescription": "Les outils nouveaux ou modifiés restent désactivés jusqu’à leur approbation.",
+    "saveTools": "Enregistrer la sélection",
+    "savingTools": "Enregistrement de la sélection...",
+    "toolsSaved": "Sélection d’outils enregistrée.",
+    "emptyTitle": "Aucun serveur MCP en amont",
+    "emptyDescription": "Ajoutez un endpoint Streamable HTTP pour proposer les outils approuvés aux Agent.",
+    "noToolsTitle": "Aucun outil découvert",
+    "noToolsDescription": "Synchronisez le serveur pour charger les contrats d’outils.",
+    "fields": {
+      "name": "Nom affiché",
+      "slug": "Slug",
+      "endpoint": "Endpoint MCP",
+      "auth": "Authentification",
+      "headerName": "En-tête API Key",
+      "credential": "Identifiant"
+    },
+    "auth": {
+      "none": "Aucune authentification",
+      "bearer": "Bearer Token",
+      "apiKeyHeader": "En-tête API Key personnalisé"
+    },
+    "syncStatus": {
+      "never": "Non synchronisé",
+      "ok": "Synchronisé",
+      "error": "Échec de synchronisation"
+    },
+    "toolStatus": {
+      "available": "Disponible",
+      "review_required": "Révision requise",
+      "removed": "Supprimé en amont",
+      "invalid": "Contrat invalide"
+    }
   },
   "providers": {
     "catalogTitle": "Fournisseurs",
