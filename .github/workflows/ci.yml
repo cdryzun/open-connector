@@ -29,7 +29,9 @@ env:
 jobs:
   ci:
     name: Lint, Typecheck & Test
-    runs-on: ubuntu-latest
+    # The repository-scoped runner also publishes images, so CI and release
+    # builds serialize without depending on hosted-runner queue availability.
+    runs-on: [self-hosted, Linux, X64]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
