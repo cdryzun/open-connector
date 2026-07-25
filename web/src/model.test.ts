@@ -1,7 +1,7 @@
 import type { AppData, ProviderDefinition, RunLog } from "./model";
 
 import { describe, expect, it } from "vitest";
-import { createOverviewSummary, resolveProviderConnectionStatus, sortProviders } from "./model";
+import { createOverviewSummary, providerCatalogEntries, resolveProviderConnectionStatus, sortProviders } from "./model";
 
 function provider(service: string, displayName: string): ProviderDefinition {
   return {
@@ -128,6 +128,22 @@ describe("createOverviewSummary", () => {
         ],
       }).connectedCount,
     ).toBe(1);
+  });
+
+  it("keeps upstream MCP entries out of provider counts without dropping their actions", () => {
+    const upstream = {
+      ...provider("mcp_teambition", "Teambition MCP"),
+      catalogSource: "upstream_mcp" as const,
+      actions: [action("mcp_teambition.SearchTasksByTQLV2", true)],
+    };
+    const providers = [provider("github", "GitHub"), upstream];
+
+    expect(providerCatalogEntries(providers).map((item) => item.service)).toEqual(["github"]);
+    expect(createOverviewSummary({ ...emptyAppData, providers })).toMatchObject({
+      providerCount: 1,
+      actionCount: 1,
+      locallyExecutableActionCount: 1,
+    });
   });
 
   it("counts all failed runs while keeping the display list capped", () => {

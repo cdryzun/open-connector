@@ -83,10 +83,14 @@ export class UpstreamMcpServerService {
     const slug = normalizeSlug(input.slug);
     const now = new Date().toISOString();
     const service = `mcp_${slug.replaceAll("-", "_")}`;
-    if (this.catalog.providers.some((provider) => provider.service === service)) {
+    const conflictingProvider = this.catalog.providers.find(
+      (provider) =>
+        provider.catalogSource === "provider" && (provider.service === slug || provider.service === service),
+    );
+    if (conflictingProvider) {
       throw new UpstreamMcpServerServiceError(
         "mcp_server_conflict",
-        `MCP server service conflicts with an existing provider: ${service}.`,
+        `MCP server slug or service conflicts with an existing provider: ${conflictingProvider.service}.`,
         409,
       );
     }

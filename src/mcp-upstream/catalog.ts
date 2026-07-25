@@ -25,9 +25,12 @@ export async function refreshUpstreamMcpCatalog(catalog: CatalogStore, store: IU
       }),
     )
   ).filter((upstream): upstream is UpstreamMcpServerWithTools => upstream !== undefined);
-  const providers = upstreams.map(toProviderDefinition);
-  const executableActionIds = providers.flatMap((provider) => provider.actions.map((action) => action.id));
-  replaceDynamicProviders(catalog, providers, executableActionIds);
+  const registrations = upstreams.map((upstream) => ({
+    provider: toProviderDefinition(upstream),
+    aliases: [upstream.server.slug],
+  }));
+  const executableActionIds = registrations.flatMap(({ provider }) => provider.actions.map((action) => action.id));
+  replaceDynamicProviders(catalog, { registrations, executableActionIds });
 }
 
 export function toProviderDefinition(input: UpstreamMcpServerWithTools): ProviderDefinition {

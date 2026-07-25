@@ -1,7 +1,7 @@
 import type { ProviderDefinition } from "./core/types.ts";
 
 import { describe, expect, it } from "vitest";
-import { createCatalogStore } from "./catalog-store.ts";
+import { createCatalogStore, replaceDynamicProviders, resolveCatalogService } from "./catalog-store.ts";
 
 describe("catalog store", () => {
   it("preserves optional provider descriptions without defaulting missing ones", () => {
@@ -71,5 +71,39 @@ describe("catalog store", () => {
       type: "object",
       properties: { message: { type: "string" } },
     });
+  });
+
+  it("tracks upstream MCP catalog entries separately and resolves their slug aliases", () => {
+    const staticProvider: ProviderDefinition = {
+      service: "example",
+      displayName: "Static Example",
+      categories: ["Developer Tools"],
+      authTypes: ["no_auth"],
+      auth: [{ type: "no_auth" }],
+      actions: [],
+    };
+    const upstreamProvider: ProviderDefinition = {
+      service: "mcp_teambition",
+      displayName: "Teambition MCP",
+      categories: ["mcp"],
+      authTypes: ["api_key"],
+      auth: [{ type: "api_key" }],
+      actions: [],
+    };
+    const catalog = createCatalogStore([staticProvider]);
+
+    replaceDynamicProviders(catalog, {
+      registrations: [{ provider: upstreamProvider, aliases: ["teambition"] }],
+      executableActionIds: [],
+    });
+
+    expect(catalog.providers).toMatchObject([
+      { service: "example", catalogSource: "provider" },
+      { service: "mcp_teambition", catalogSource: "upstream_mcp" },
+    ]);
+    expect(resolveCatalogService(catalog, "example")).toBe("example");
+    expect(resolveCatalogService(catalog, "teambition")).toBe("mcp_teambition");
+    expect(resolveCatalogService(catalog, "mcp_teambition")).toBe("mcp_teambition");
+    expect(resolveCatalogService(catalog, "missing")).toBeUndefined();
   });
 });

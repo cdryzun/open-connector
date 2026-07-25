@@ -57,6 +57,7 @@ export interface FullActionDefinition extends ActionDefinition {
 export interface ProviderDefinition {
   service: string;
   displayName: string;
+  catalogSource?: "provider" | "upstream_mcp";
   description?: string;
   categories: string[];
   authTypes: string[];
@@ -316,7 +317,7 @@ export function createOverviewSummary(data: AppData): OverviewSummary {
   const actions = data.providers.flatMap((provider) => provider.actions);
   const failedRuns = data.runs.filter((run) => !run.ok);
   return {
-    providerCount: data.providers.length,
+    providerCount: providerCatalogEntries(data.providers).length,
     actionCount: actions.length,
     locallyExecutableActionCount: actions.filter((action) => action.execution.locallyExecutable).length,
     connectedCount: data.connections.filter(isUsableCredentialConnection).length,
@@ -404,6 +405,11 @@ export function filterProviders(providers: ProviderDefinition[], query: string):
       .toLowerCase()
       .includes(normalized),
   );
+}
+
+/** Provider catalog entries exclude runtime-managed upstream MCP servers. */
+export function providerCatalogEntries(providers: ProviderDefinition[]): ProviderDefinition[] {
+  return providers.filter((provider) => provider.catalogSource !== "upstream_mcp");
 }
 
 export function sortProviders(

@@ -16,7 +16,10 @@ export type RuntimeActionDefinition = ActionDefinition & {
   execution: ActionExecutionStatus;
 };
 
+export type RuntimeCatalogSource = "provider" | "upstream_mcp";
+
 export type RuntimeProviderDefinition = Omit<ProviderDefinition, "actions"> & {
+  catalogSource: RuntimeCatalogSource;
   actions: RuntimeActionDefinition[];
   execution: {
     actionCount: number;
@@ -68,6 +71,8 @@ export type CatalogStore = {
   actions: RuntimeActionDefinition[];
   actionsById: Map<string, RuntimeActionDefinition>;
   executableActionIds: Set<string>;
+  /** Runtime-only aliases for resolving upstream MCP slugs to canonical service ids. */
+  serviceAliases: ReadonlyMap<string, string>;
 };
 
 export interface LoadCatalogOptions {
@@ -79,11 +84,21 @@ interface StaticCatalogState {
   executableActionIds: Set<string>;
 }
 
+export interface DynamicProviderRegistration {
+  provider: ProviderDefinition;
+  aliases: readonly string[];
+}
+
+export interface ReplaceDynamicProvidersInput {
+  registrations: readonly DynamicProviderRegistration[];
+  executableActionIds: Iterable<string>;
+}
+
 const staticCatalogStates = new WeakMap<CatalogStore, StaticCatalogState>();
 
 export function createCatalogStore(providers: ProviderDefinition[], options: LoadCatalogOptions = {}): CatalogStore {
   const executableActionIds = new Set(options.executableActionIds ?? []);
-  const catalog = buildCatalogStore(providers, executableActionIds, 0);
+  const catalog = buildCatalogStore(providers, [], executableActionIds, 0);
   staticCatalogStates.set(catalog, {
     providers: [...providers],
     executableActionIds,
@@ -97,18 +112,21 @@ export function createCatalogStore(providers: ProviderDefinition[], options: Loa
  * The store object is updated in place so long-lived services observe the same
  * catalog revision without rebuilding their dependency graph.
  */
-export function replaceDynamicProviders(
-  catalog: CatalogStore,
-  providers: ProviderDefinition[],
-  executableActionIds: Iterable<string>,
-): void {
+export function replaceDynamicProviders(catalog: CatalogStore, input: ReplaceDynamicProvidersInput): void {
   const staticState = staticCatalogStates.get(catalog);
   if (!staticState) {
     throw new Error("Catalog store was not created by createCatalogStore.");
   }
-  const nextExecutableActionIds = new Set([...staticState.executableActionIds, ...executableActionIds]);
+  const staticServices = new Set(staticState.providers.map((provider) => provider.service));
+  for (const registration of input.registrations) {
+    if (staticServices.has(registration.provider.service)) {
+      throw new Error(`Dynamic provider service conflicts with the static catalog: ${registration.provider.service}.`);
+    }
+  }
+  const nextExecutableActionIds = new Set([...staticState.executableActionIds, ...input.executableActionIds]);
   const next = buildCatalogStore(
-    [...staticState.providers, ...providers],
+    staticState.providers,
+    input.registrations,
     nextExecutableActionIds,
     catalog.revision + 1,
   );
@@ -116,10 +134,15 @@ export function replaceDynamicProviders(
 }
 
 function buildCatalogStore(
-  providers: ProviderDefinition[],
+  staticProviders: ProviderDefinition[],
+  dynamicRegistrations: readonly DynamicProviderRegistration[],
   executableActions: Set<string>,
   revision: number,
 ): CatalogStore {
+  const dynamicProviders = dynamicRegistrations.map((registration) => registration.provider);
+  const dynamicServices = new Set(dynamicProviders.map((provider) => provider.service));
+  const serviceAliases = buildServiceAliases(dynamicRegistrations);
+  const providers = [...staticProviders, ...dynamicProviders];
   const sortedProviders = sortProviders(providers);
   const runtimeProviders = sortedProviders.map((provider): RuntimeProviderDefinition => {
     const actions = provider.actions.map(
@@ -131,6 +154,7 @@ function buildCatalogStore(
 
     return {
       ...provider,
+      catalogSource: dynamicServices.has(provider.service) ? "upstream_mcp" : "provider",
       actions,
       execution: {
         actionCount: actions.length,
@@ -152,7 +176,43 @@ function buildCatalogStore(
     actions,
     actionsById: new Map(actions.map((action) => [action.id, action])),
     executableActionIds: executableActions,
+    serviceAliases,
   };
+}
+
+function buildServiceAliases(registrations: readonly DynamicProviderRegistration[]): ReadonlyMap<string, string> {
+  const aliases = new Map<string, string>();
+  for (const registration of registrations) {
+    for (const alias of registration.aliases) {
+      const normalized = normalizeServiceAlias(alias);
+      const existing = aliases.get(normalized);
+      if (existing && existing !== registration.provider.service) {
+        throw new Error(`Dynamic provider alias is ambiguous: ${alias}.`);
+      }
+      aliases.set(normalized, registration.provider.service);
+    }
+  }
+  return aliases;
+}
+
+function normalizeServiceAlias(alias: string): string {
+  const normalized = alias.trim().toLowerCase();
+  if (!normalized) {
+    throw new Error("Dynamic provider aliases must not be empty.");
+  }
+  return normalized;
+}
+
+/**
+ * Resolve a canonical provider service or a unique upstream MCP slug alias.
+ *
+ * Exact catalog services always win, preserving stable provider behavior when
+ * an older upstream MCP registration later overlaps with a static provider.
+ */
+export function resolveCatalogService(catalog: CatalogStore, requestedService: string): string | undefined {
+  const requested = requestedService.trim();
+  const exact = catalog.providers.find((provider) => provider.service === requested);
+  return exact?.service ?? catalog.serviceAliases.get(requested.toLowerCase());
 }
 
 /**

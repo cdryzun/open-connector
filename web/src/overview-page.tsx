@@ -7,7 +7,7 @@ import { useTranslate } from "@embra/i18n/react";
 import { Activity, ArrowRight, ArrowUpRight, Cable, RefreshCw, TerminalSquare } from "lucide-react";
 import { Link } from "react-router";
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
-import { createOverviewSummary, sortProviders } from "./model";
+import { createOverviewSummary, providerCatalogEntries, sortProviders } from "./model";
 import { EmptyState, ProviderIcon } from "./shared-ui";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -43,7 +43,7 @@ export function OverviewPage(props: OverviewPageProps): ReactNode {
   const callTrend = createCallTrend(props.data);
   const recentCalls = createRecentCalls(props.data);
   const connectionsByService = new Map(props.data.connections.map((connection) => [connection.service, connection]));
-  const providerIconSources = sortProviders(props.data.providers, connectionsByService).slice(
+  const providerIconSources = sortProviders(providerCatalogEntries(props.data.providers), connectionsByService).slice(
     0,
     capabilityProviderIconLimit,
   );
