@@ -7,7 +7,7 @@ import type { IRunLogStore, RunLog, RunLogPage } from "./server/storage/runtime-
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it, vi } from "vitest";
-import { createCatalogStore } from "./catalog-store.ts";
+import { createCatalogStore, replaceDynamicProviders } from "./catalog-store.ts";
 import { ConnectionService } from "./connection-service.ts";
 import { ActionPolicyService, emptyPolicyRules } from "./core/action-policy.ts";
 import { createMcpServer } from "./mcp.ts";
@@ -183,6 +183,71 @@ describe("MCP server", () => {
       });
       expect(JSON.stringify(result.structuredContent)).not.toContain("test-token");
     });
+  });
+
+  it("resolves an upstream MCP slug alias for connections and action search", async () => {
+    const upstreamAction: ActionDefinition = {
+      ...echoAction,
+      id: "mcp_teambition.SearchTasksByTQLV2",
+      service: "mcp_teambition",
+      name: "SearchTasksByTQLV2",
+      description: "Search Teambition project tasks by TQL.",
+    };
+    const upstreamProvider: ProviderDefinition = {
+      service: "mcp_teambition",
+      displayName: "Teambition",
+      categories: ["mcp"],
+      authTypes: ["api_key"],
+      auth: [{ type: "api_key" }],
+      actions: [upstreamAction],
+    };
+    const catalog = createCatalogStore([]);
+    replaceDynamicProviders(catalog, {
+      registrations: [{ provider: upstreamProvider, aliases: ["teambition"] }],
+      executableActionIds: [upstreamAction.id],
+    });
+
+    await withCatalogMcpClient(
+      catalog,
+      async (client) => {
+        const connections = await client.callTool({
+          name: "list_connections",
+          arguments: { service: "teambition" },
+        });
+        const actions = await client.callTool({
+          name: "search_actions",
+          arguments: {
+            service: "teambition",
+            query: "project tasks list task due date status",
+            limit: 50,
+          },
+        });
+
+        expect(connections.structuredContent).toMatchObject({
+          ok: true,
+          data: [{ service: "mcp_teambition" }],
+        });
+        expect(actions.structuredContent).toMatchObject({
+          ok: true,
+          data: [{ id: "mcp_teambition.SearchTasksByTQLV2", service: "mcp_teambition" }],
+        });
+      },
+      [
+        {
+          id: "teambition-default",
+          service: "mcp_teambition",
+          connectionName: "default",
+          credential: {
+            ...defaultCredential,
+            profile: {
+              ...defaultCredential.profile,
+              accountId: "teambition-account",
+              displayName: "Teambition",
+            },
+          },
+        },
+      ],
+    );
   });
 
   it("uses an explicitly selected connection for guides and execution", async () => {
@@ -534,6 +599,36 @@ async function withAuthenticatedMcpClient(
   const actions = new ActionRunner({ catalog, providerLoader, connections, runs });
   const server = createMcpServer({ catalog, providerLoader, connections, actions });
   const client = new Client({ name: "mcp-test", version: "0.0.0" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  try {
+    await run(client);
+  } finally {
+    await client.close();
+  }
+}
+
+async function withCatalogMcpClient(
+  catalog: ReturnType<typeof createCatalogStore>,
+  run: (client: Client) => Promise<void>,
+  storedConnections: StoredConnection[] = [],
+) {
+  const providerLoader = new EchoProviderLoader();
+  const connections = new ConnectionService({
+    catalog,
+    providerLoader,
+    store: new MemoryConnectionStore(storedConnections),
+  });
+  const actions = new ActionRunner({
+    catalog,
+    providerLoader,
+    connections,
+    runs: new MemoryRunLogStore(),
+  });
+  const server = createMcpServer({ catalog, providerLoader, connections, actions });
+  const client = new Client({ name: "mcp-catalog-test", version: "0.0.0" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
 
   await server.connect(serverTransport);

@@ -211,11 +211,19 @@ describe("UpstreamMcpServerService", () => {
     ).rejects.toBeInstanceOf(UpstreamMcpServerServiceError);
   });
 
-  it("rejects a dynamic service that conflicts with a static provider", async () => {
+  it("rejects a dynamic slug or generated service that conflicts with a static provider", async () => {
     const catalog = createCatalogStore([
       {
-        service: "mcp_example",
-        displayName: "Static MCP Example",
+        service: "example",
+        displayName: "Static Example",
+        categories: ["Developer Tools"],
+        authTypes: ["no_auth"],
+        auth: [{ type: "no_auth" }],
+        actions: [],
+      },
+      {
+        service: "mcp_reserved",
+        displayName: "Reserved MCP Service",
         categories: ["Developer Tools"],
         authTypes: ["no_auth"],
         auth: [{ type: "no_auth" }],
@@ -228,6 +236,15 @@ describe("UpstreamMcpServerService", () => {
       service.createServer({
         slug: "example",
         displayName: "Dynamic MCP Example",
+        endpoint: "https://mcp.example.com/mcp",
+        auth: { type: "none" },
+      }),
+    ).rejects.toMatchObject({ code: "mcp_server_conflict" });
+
+    await expect(
+      service.createServer({
+        slug: "reserved",
+        displayName: "Reserved MCP",
         endpoint: "https://mcp.example.com/mcp",
         auth: { type: "none" },
       }),

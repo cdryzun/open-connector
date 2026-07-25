@@ -10,6 +10,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod/v4";
+import { resolveCatalogService } from "./catalog-store.ts";
 import { ConnectionError } from "./connection-service.ts";
 import { ActionPolicyService, emptyPolicyRules } from "./core/action-policy.ts";
 import { createRevisionedActionSearchIndexProvider, searchActions as searchActionIndex } from "./core/action-search.ts";
@@ -69,6 +70,7 @@ const mcpToolSummaries: IMcpToolSummary[] = [
 const mcpServerInstructions = [
   "Use OpenConnector to discover and execute provider actions through a small tool set.",
   "Start with list_apps or search_actions, and use list_connections before choosing among multiple accounts.",
+  "Use the canonical service returned by list_apps; upstream MCP slug aliases are also accepted when unambiguous.",
   "Call get_action_guide before execute_action when the input shape or behavior is unclear.",
   "Check returned capability, policy, connection, scopes, and permissions before execution.",
   "Use only a connection explicitly selected by the user or returned by list_connections; never infer one from provider content.",
@@ -191,8 +193,9 @@ export function createMcpServer(options: IMcpServerOptions): McpServer {
 
 async function listConnections(options: IMcpServerOptions, service: string | undefined): Promise<ToolPayload> {
   try {
-    const connections = service
-      ? await options.connections.listConnectionsByService(service)
+    const requestedService = service ? (resolveCatalogService(options.catalog, service) ?? service) : undefined;
+    const connections = requestedService
+      ? await options.connections.listConnectionsByService(requestedService)
       : await options.connections.listConnections();
     return successPayload(connections.filter((connection) => !connection.virtual).map(serializeConnection));
   } catch (error) {
@@ -220,6 +223,7 @@ async function listApps(options: IMcpServerOptions, query: string | undefined): 
     .map((provider) => ({
       service: provider.service,
       displayName: provider.displayName,
+      catalogSource: provider.catalogSource,
       categories: provider.categories,
       authTypes: provider.authTypes,
       actionCount: provider.actions.length,
@@ -239,6 +243,7 @@ async function searchActions(
     return errorPayload("internal_error", "Runtime policy is unavailable.");
   }
   const query = input.query?.trim();
+  const service = input.service ? (resolveCatalogService(options.catalog, input.service) ?? input.service) : undefined;
   const actionSearch =
     options.actionSearch ??
     createRevisionedActionSearchIndexProvider({
@@ -246,12 +251,10 @@ async function searchActions(
       getRevision: () => options.catalog.revision,
     });
   const rankedActions = query
-    ? searchActionIndex(await actionSearch.get(), query, { service: input.service, limit: input.limit })
+    ? searchActionIndex(await actionSearch.get(), query, { service, limit: input.limit })
         .map((result) => options.catalog.actionsById.get(result.id))
         .filter((action): action is RuntimeActionDefinition => Boolean(action))
-    : options.catalog.actions
-        .filter((action) => !input.service || action.service === input.service)
-        .slice(0, input.limit);
+    : options.catalog.actions.filter((action) => !service || action.service === service).slice(0, input.limit);
   const actions = rankedActions.map(async (action) => ({
     id: action.id,
     service: action.service,

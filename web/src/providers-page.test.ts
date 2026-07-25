@@ -131,6 +131,27 @@ describe("ProvidersPage route shell", () => {
     expect(markup).not.toContain("Reset OAuth Client");
   });
 
+  it("does not render upstream MCP entries in the provider browser", () => {
+    const markup = renderProvidersPage(
+      {
+        ...providerData,
+        providers: [
+          oauthProvider,
+          {
+            ...noAuthProvider,
+            service: "mcp_teambition",
+            displayName: "Teambition MCP",
+            catalogSource: "upstream_mcp",
+          },
+        ],
+      },
+      "/providers",
+    );
+
+    expect(markup).toContain("Showing 1 / 1");
+    expect(markup).not.toContain("Teambition MCP");
+  });
+
   it("renders a full provider detail page at /providers/:service", () => {
     const markup = renderProvidersPage(providerData, "/providers/gmail");
 

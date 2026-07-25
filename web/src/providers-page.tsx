@@ -31,6 +31,7 @@ import { apiDelete, apiPost, apiPut } from "./api";
 import {
   credentialFieldsFor,
   filterProviders,
+  providerCatalogEntries,
   resolveProviderConnectionStatus,
   sortProviders,
   usableConnectionsForService,
@@ -58,6 +59,7 @@ interface ProviderDetailProps {
 
 interface ProviderBrowserProps {
   data: AppData;
+  providers: ProviderDefinition[];
 }
 
 interface ProviderCardProps {
@@ -115,12 +117,11 @@ const providerCardStyle = {
 
 export function ProvidersPage(props: ProvidersPageProps): ReactNode {
   const params = useParams();
-  const routeProvider = params.service
-    ? props.data.providers.find((provider) => provider.service === params.service)
-    : undefined;
+  const providers = providerCatalogEntries(props.data.providers);
+  const routeProvider = params.service ? providers.find((provider) => provider.service === params.service) : undefined;
 
   if (!params.service) {
-    return <ProviderBrowser data={props.data} />;
+    return <ProviderBrowser data={props.data} providers={providers} />;
   }
 
   if (!routeProvider) {
@@ -153,12 +154,12 @@ function ProviderBrowser(props: ProviderBrowserProps): ReactNode {
   const statusByService = useMemo(
     () =>
       new Map(
-        props.data.providers.map((provider) => [
+        props.providers.map((provider) => [
           provider.service,
           resolveProviderConnectionStatus(provider, props.data.connections, props.data.oauthConfigs),
         ]),
       ),
-    [props.data.connections, props.data.oauthConfigs, props.data.providers],
+    [props.data.connections, props.data.oauthConfigs, props.providers],
   );
   const credentialConnectionsByService = useMemo(
     () =>
@@ -170,8 +171,8 @@ function ProviderBrowser(props: ProviderBrowserProps): ReactNode {
     [statusByService],
   );
   const sortedProviders = useMemo(
-    () => sortProviders(props.data.providers, credentialConnectionsByService),
-    [credentialConnectionsByService, props.data.providers],
+    () => sortProviders(props.providers, credentialConnectionsByService),
+    [credentialConnectionsByService, props.providers],
   );
   const searchedProviders = filterProviders(sortedProviders, query);
   const visibleProviders = filterProvidersByStatus(searchedProviders, statusFilter, statusByService);
@@ -220,7 +221,7 @@ function ProviderBrowser(props: ProviderBrowserProps): ReactNode {
         filtersActive={filtersActive}
         providerCount={visibleProviders.length}
         selected={statusFilter}
-        totalProviderCount={props.data.providers.length}
+        totalProviderCount={props.providers.length}
         onReset={resetFilters}
         onSelect={setStatusFilter}
       />
