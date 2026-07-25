@@ -21,4 +21,11 @@ describe("Docker image dependency installation", () => {
       expect(installBlock).toContain("--fetch-timeout=120000");
     }
   });
+
+  it("builds platform-independent application assets on the native builder platform", async () => {
+    const dockerfile = await readFile(new URL("../docker/Dockerfile", import.meta.url), "utf8");
+    const nativeBuildStages = dockerfile.match(/^FROM --platform=\$BUILDPLATFORM .+ AS build$/gm) ?? [];
+
+    expect(nativeBuildStages).toEqual(["FROM --platform=$BUILDPLATFORM node:24-alpine AS build"]);
+  });
 });
