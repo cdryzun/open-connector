@@ -142,6 +142,8 @@
     "reviewRequired": "需要审核",
     "tools": "发布的工具",
     "toolsDescription": "新增和发生变更的工具默认停用，需要人工审核后启用。",
+    "selectAllTools": "全选可发布工具",
+    "selectedToolsCount": "已选择 {{selected}} / {{total}}",
     "saveTools": "保存工具选择",
     "savingTools": "正在保存工具选择...",
     "toolsSaved": "工具选择已保存。",

@@ -142,6 +142,8 @@
     "reviewRequired": "Review required",
     "tools": "Published tools",
     "toolsDescription": "New and changed tools stay disabled until you approve them.",
+    "selectAllTools": "Select all publishable tools",
+    "selectedToolsCount": "{{selected}} of {{total}} selected",
     "saveTools": "Save tool selection",
     "savingTools": "Saving tool selection...",
     "toolsSaved": "Tool selection saved.",

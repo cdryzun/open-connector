@@ -47,7 +47,8 @@
 }
 
 .mcp-server-row,
-.mcp-tool-row {
+.mcp-tool-row,
+.mcp-tool-bulk-row {
   display: flex;
   width: 100%;
   align-items: center;
@@ -58,6 +59,36 @@
   background: transparent;
   color: inherit;
   text-align: left;
+}
+
+.mcp-tool-bulk-row {
+  background: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.mcp-tool-bulk-row:has(input:disabled) {
+  cursor: default;
+}
+
+.mcp-tool-bulk-row small {
+  margin-left: auto;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+
+.mcp-tool-bulk-row input,
+.mcp-tool-row input {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  accent-color: var(--primary);
+}
+
+.mcp-tool-bulk-row input:focus-visible,
+.mcp-tool-row input:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--ring) 70%, transparent);
+  outline-offset: 2px;
 }
 
 .mcp-server-row {
