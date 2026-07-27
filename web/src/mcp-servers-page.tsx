@@ -40,6 +40,14 @@ export function McpServersPage(props: McpServersPageProps): ReactNode {
     () => detail?.tools.filter((tool) => tool.status === "review_required").length ?? 0,
     [detail],
   );
+  const selectableToolNames =
+    detail?.tools
+      .filter((tool) => tool.status !== "removed" && tool.status !== "invalid")
+      .map((tool) => tool.upstreamName) ?? [];
+  const enabledToolNames = new Set(enabledTools);
+  const selectedToolCount = selectableToolNames.filter((name) => enabledToolNames.has(name)).length;
+  const allToolsSelected = selectableToolNames.length > 0 && selectedToolCount === selectableToolNames.length;
+  const someToolsSelected = selectedToolCount > 0 && !allToolsSelected;
 
   useEffect(() => {
     let cancelled = false;
@@ -204,6 +212,10 @@ export function McpServersPage(props: McpServersPageProps): ReactNode {
     setEnabledTools((current) =>
       current.includes(name) ? current.filter((candidate) => candidate !== name) : [...current, name],
     );
+  }
+
+  function toggleAllTools(): void {
+    setEnabledTools((current) => nextBulkToolSelection(selectableToolNames, current));
   }
 
   return (
@@ -375,24 +387,45 @@ export function McpServersPage(props: McpServersPageProps): ReactNode {
                     description={t("mcpServers.noToolsDescription")}
                   />
                 ) : (
-                  detail.tools.map((tool) => {
-                    const selectable = tool.status !== "removed" && tool.status !== "invalid";
-                    return (
-                      <label key={tool.upstreamName} className="mcp-tool-row">
-                        <input
-                          type="checkbox"
-                          checked={enabledTools.includes(tool.upstreamName)}
-                          disabled={!selectable || busy}
-                          onChange={() => toggleTool(tool.upstreamName)}
-                        />
-                        <span>
-                          <strong>{tool.title ?? tool.upstreamName}</strong>
-                          <small>{tool.description ?? tool.upstreamName}</small>
-                        </span>
-                        <Badge tone={toolTone(tool.status)}>{t(`mcpServers.toolStatus.${tool.status}`)}</Badge>
-                      </label>
-                    );
-                  })
+                  <>
+                    <label className="mcp-tool-bulk-row">
+                      <input
+                        type="checkbox"
+                        aria-checked={someToolsSelected ? "mixed" : allToolsSelected}
+                        checked={allToolsSelected}
+                        disabled={selectableToolNames.length === 0 || busy}
+                        ref={(checkbox) => {
+                          if (checkbox) checkbox.indeterminate = someToolsSelected;
+                        }}
+                        onChange={toggleAllTools}
+                      />
+                      <strong>{t("mcpServers.selectAllTools")}</strong>
+                      <small>
+                        {t("mcpServers.selectedToolsCount", {
+                          selected: selectedToolCount,
+                          total: selectableToolNames.length,
+                        })}
+                      </small>
+                    </label>
+                    {detail.tools.map((tool) => {
+                      const selectable = tool.status !== "removed" && tool.status !== "invalid";
+                      return (
+                        <label key={tool.upstreamName} className="mcp-tool-row">
+                          <input
+                            type="checkbox"
+                            checked={enabledToolNames.has(tool.upstreamName)}
+                            disabled={!selectable || busy}
+                            onChange={() => toggleTool(tool.upstreamName)}
+                          />
+                          <span>
+                            <strong>{tool.title ?? tool.upstreamName}</strong>
+                            <small>{tool.description ?? tool.upstreamName}</small>
+                          </span>
+                          <Badge tone={toolTone(tool.status)}>{t(`mcpServers.toolStatus.${tool.status}`)}</Badge>
+                        </label>
+                      );
+                    })}
+                  </>
                 )}
               </div>
             </Card>
@@ -401,6 +434,12 @@ export function McpServersPage(props: McpServersPageProps): ReactNode {
       )}
     </section>
   );
+}
+
+export function nextBulkToolSelection(selectableToolNames: string[], enabledTools: string[]): string[] {
+  const enabledToolNames = new Set(enabledTools);
+  const allSelected = selectableToolNames.length > 0 && selectableToolNames.every((name) => enabledToolNames.has(name));
+  return allSelected ? [] : selectableToolNames;
 }
 
 function syncTone(status: UpstreamMcpServer["syncStatus"]): "success" | "warning" | "error" {

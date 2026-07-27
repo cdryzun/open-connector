@@ -142,6 +142,8 @@
     "reviewRequired": "需要審核",
     "tools": "已發佈工具",
     "toolsDescription": "新增及變更的工具會維持停用，直到您核准為止。",
+    "selectAllTools": "全選可發佈工具",
+    "selectedToolsCount": "已選取 {{selected}} / {{total}}",
     "saveTools": "儲存工具選擇",
     "savingTools": "正在儲存工具選擇...",
     "toolsSaved": "工具選擇已儲存。",

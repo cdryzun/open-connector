@@ -142,6 +142,8 @@
     "reviewRequired": "Révision requise",
     "tools": "Outils publiés",
     "toolsDescription": "Les outils nouveaux ou modifiés restent désactivés jusqu’à leur approbation.",
+    "selectAllTools": "Sélectionner tous les outils publiables",
+    "selectedToolsCount": "{{selected}} sur {{total}} sélectionnés",
     "saveTools": "Enregistrer la sélection",
     "savingTools": "Enregistrement de la sélection...",
     "toolsSaved": "Sélection d’outils enregistrée.",
